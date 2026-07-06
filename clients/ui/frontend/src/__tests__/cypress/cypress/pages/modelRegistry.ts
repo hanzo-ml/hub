@@ -64,22 +64,22 @@ class ModelRegistry {
 
   visit() {
     cy.visit(`/model-registry`);
-    this.wait();
+    this.waitForPageLoaded();
   }
 
   navigate() {
     appChrome.findNavItem('Model Registry').click();
-    this.wait();
+    this.waitForPageLoaded();
   }
 
-  private wait() {
-    cy.findByTestId('app-page-title').should('exist');
+  waitForPageLoaded() {
+    appChrome.waitForA11y();
     cy.findByTestId('app-page-title').contains('Model Registry');
-    cy.testA11y();
   }
 
   private waitLanding() {
     cy.findByTestId('home-page').should('be.visible');
+    cy.testA11y();
   }
 
   shouldBeEmpty() {
@@ -189,11 +189,19 @@ class ModelRegistry {
   }
 
   findTableSearch() {
-    return cy.findByTestId('filter-toolbar-text-field');
+    return cy.get('[data-testid$="-toolbar"]').find('[data-testid$="-input"]').filter(':visible');
   }
 
   findFilterDropdownItem(name: string) {
-    return cy.findByTestId(`filter-toolbar-dropdown`).findDropdownItem(name);
+    return cy
+      .get('[data-testid$="-toolbar"]')
+      .find('[data-testid$="-dropdown"]')
+      .then(($el) => {
+        if ($el.attr('aria-expanded') === 'false') {
+          cy.wrap($el).click();
+        }
+        return cy.get('body').findByRole('option', { name });
+      });
   }
 
   findModelVersionsTableToolbar() {
@@ -213,15 +221,16 @@ class ModelRegistry {
   }
 
   findModelVersionsTableFilterOption(name: string) {
-    return cy.findByTestId('filter-toolbar-dropdown').findDropdownItem(name);
+    return cy.findByTestId('model-versions-table-dropdown').then(($el) => {
+      if ($el.attr('aria-expanded') === 'false') {
+        cy.wrap($el).click();
+      }
+      return cy.findByRole('option', { name });
+    });
   }
 
   findRegisterModelButton() {
     return cy.findByRole('button', { name: 'Register model' });
-  }
-
-  findRegisteredModelsTableToolbar() {
-    return cy.findByTestId('registered-models-table-toolbar');
   }
 }
 

@@ -12,7 +12,8 @@ import {
 import { Link } from 'react-router-dom';
 import { HelpIcon, AngleLeftIcon, AngleRightIcon, ArrowRightIcon } from '@patternfly/react-icons';
 import { TruncatedText } from 'mod-arch-shared';
-import { CatalogModel, CatalogSource } from '~/app/modelCatalogTypes';
+import type { CatalogSource } from '~/app/shared/types/catalogTypes';
+import type { CatalogModel } from '~/app/modelCatalogTypes';
 import {
   extractValidatedModelMetrics,
   getLatencyValue,
@@ -48,8 +49,7 @@ const ModelCatalogCardBody: React.FC<ModelCatalogCardBodyProps> = ({
   source,
 }) => {
   const [currentPerformanceIndex, setCurrentPerformanceIndex] = useState(0);
-  const { filterData, filterOptions, performanceViewEnabled } =
-    React.useContext(ModelCatalogContext);
+  const { filters, filterOptions, performanceViewEnabled } = React.useContext(ModelCatalogContext);
   const notification = useNotification();
   const errorNotificationShown = React.useRef(false);
 
@@ -63,9 +63,9 @@ const ModelCatalogCardBody: React.FC<ModelCatalogCardBodyProps> = ({
 
   // Get performance-specific filter params for the /performance_artifacts endpoint
   // Always apply performance filters to get accurate benchmark counts, regardless of toggle state
-  const targetRPS = filterData[ModelCatalogNumberFilterKey.MAX_RPS];
+  const targetRPS = filters[ModelCatalogNumberFilterKey.MAX_RPS];
   // Get full filter key for display purposes
-  const latencyFieldName = getActiveLatencyFieldName(filterData);
+  const latencyFieldName = getActiveLatencyFieldName(filters);
   // Use short property key (e.g., 'ttft_p90') for the catalog API, not the full filter key
   const latencyProperty = latencyFieldName
     ? parseLatencyFilterKey(latencyFieldName).propertyKey
@@ -91,12 +91,11 @@ const ModelCatalogCardBody: React.FC<ModelCatalogCardBodyProps> = ({
           sortOrder: SortOrder.ASC,
         }),
       },
-      filterData,
+      filters,
       filterOptions,
       isValidated, // Only fetch if validated
     );
 
-  // Performance artifacts are already filtered by the server endpoint
   const performanceMetrics = performanceArtifactsList.items;
 
   // NOTE: Accuracy metrics are not currently returned by the /performance_artifacts endpoint.
@@ -130,6 +129,7 @@ const ModelCatalogCardBody: React.FC<ModelCatalogCardBodyProps> = ({
       <TruncatedText
         content={model.description || ''}
         maxLines={4}
+        tooltipPosition="left"
         data-testid="model-catalog-card-description"
       />
     );
@@ -144,6 +144,7 @@ const ModelCatalogCardBody: React.FC<ModelCatalogCardBodyProps> = ({
             <TruncatedText
               content={model.description || ''}
               maxLines={4}
+              tooltipPosition="left"
               data-testid="model-catalog-card-description"
             />
           </StackItem>
@@ -186,6 +187,7 @@ const ModelCatalogCardBody: React.FC<ModelCatalogCardBodyProps> = ({
         <TruncatedText
           content={model.description || ''}
           maxLines={4}
+          tooltipPosition="left"
           data-testid="model-catalog-card-description"
         />
       );
@@ -198,6 +200,8 @@ const ModelCatalogCardBody: React.FC<ModelCatalogCardBodyProps> = ({
     const latencyLabel: LatencyMetric = activeLatencyField
       ? parseLatencyFilterKey(activeLatencyField).metric
       : LatencyMetric.TTFT;
+
+    const coldStartValue = metrics.coldStartTimeToLoadSeconds;
 
     return (
       <Stack hasGutter>
@@ -242,6 +246,33 @@ const ModelCatalogCardBody: React.FC<ModelCatalogCardBodyProps> = ({
                 </Popover>
               </Flex>
             </Flex>
+            {coldStartValue !== undefined && coldStartValue > 0 && (
+              <Flex direction={{ default: 'column' }}>
+                <span className="pf-v6-u-font-weight-bold" data-testid="validated-model-cold-start">
+                  {coldStartValue.toFixed(2)} s
+                </span>
+                <Flex alignItems={{ default: 'alignItemsBaseline' }} gap={{ default: 'gapXs' }}>
+                  <Content component={ContentVariants.small}>Cold start load time</Content>
+                  <Popover
+                    bodyContent={
+                      <div>
+                        <p>
+                          The time it takes for vLLM to load the model. This does not include the
+                          time it takes to download the model.
+                        </p>
+                      </div>
+                    }
+                  >
+                    <Button
+                      icon={<HelpIcon />}
+                      hasNoPadding
+                      aria-label="More info for cold start load time"
+                      variant="plain"
+                    />
+                  </Popover>
+                </Flex>
+              </Flex>
+            )}
           </Flex>
         </StackItem>
 
@@ -299,6 +330,7 @@ const ModelCatalogCardBody: React.FC<ModelCatalogCardBodyProps> = ({
     <TruncatedText
       content={model.description || ''}
       maxLines={4}
+      tooltipPosition="left"
       data-testid="model-catalog-card-description"
     />
   );

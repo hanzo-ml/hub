@@ -15,18 +15,28 @@ import (
 	"github.com/golang/glog"
 	dbmodels "github.com/kubeflow/hub/catalog/internal/catalog/modelcatalog/models"
 	"github.com/kubeflow/hub/catalog/internal/db/service"
-	"github.com/kubeflow/hub/internal/platform/apiutils"
 	models "github.com/kubeflow/hub/internal/platform/db/entity"
 )
 
 // metadataJSON represents the minimal structure needed from metadata.json files
 // Only the ID field is needed to look up existing models
 type metadataJSON struct {
-	ID              string   `json:"id"`               // Maps to model name for lookup
-	OverallAccuracy *float64 `json:"overall_accuracy"` // Overall accuracy score for the model
-	Size            *string  `json:"size"`             // Model parameter count (e.g., "8B params")
-	TensorType      *string  `json:"tensor_type"`      // Data precision (e.g., "FP16", "INT4")
-	VariantGroupID  *string  `json:"variant_group_id"` // UUID linking model variants together
+	ID                     string           `json:"id"`                        // Maps to model name for lookup
+	OverallAccuracy        *float64         `json:"overall_accuracy"`          // Overall accuracy score for the model
+	Size                   *string          `json:"size"`                      // Model parameter count (e.g., "8B params")
+	TensorType             *string          `json:"tensor_type"`               // Data precision (e.g., "FP16", "INT4")
+	VariantGroupID         *string          `json:"variant_group_id"`          // UUID linking model variants together
+	MinVRAMGB              *float64         `json:"min_vram_gb"`               // Minimum VRAM required in GB (e.g., 466.0)
+	ModelcarImageSize      *float64         `json:"modelcar_image_size"`       // Modelcar image size in GB (e.g., 405.19)
+	ModelcarImageSizeBytes *int64           `json:"modelcar_image_size_bytes"` // Modelcar image size in bytes (e.g., 405186009411)
+	ColdStartMatrix        []coldStartEntry `json:"cold_start_matrix"`         // Cold start times per GPU configuration
+}
+
+type coldStartEntry struct {
+	GPUType                    string  `json:"gpu_type"`
+	GPUCount                   int     `json:"gpu_count"`
+	ColdStartTimeToLoadSeconds float64 `json:"cold_start_time_to_load_seconds"`
+	RuntimeCommand             string  `json:"runtime_command"`
 }
 
 // parseMetadataJSON parses JSON data into metadataJSON struct, extracting only the ID field
@@ -127,6 +137,41 @@ func (pr *performanceRecord) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+// securityEvaluationRecord represents a single security evaluation result from security-evaluations.ndjson
+type securityEvaluationRecord struct {
+	// Core fields needed to associate security data with model
+	ID      string `json:"id"`
+	ModelID string `json:"model_id"`
+
+	// CustomProperties captures remaining fields dynamically
+	CustomProperties map[string]any `json:"-"`
+}
+
+// UnmarshalJSON implements custom JSON unmarshaling to capture all undefined fields as CustomProperties
+func (sr *securityEvaluationRecord) UnmarshalJSON(data []byte) error {
+	var raw map[string]any
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.UseNumber()
+	if err := decoder.Decode(&raw); err != nil {
+		return err
+	}
+
+	if id, ok := raw["id"].(string); ok {
+		sr.ID = id
+	}
+	if modelID, ok := raw["model_id"].(string); ok {
+		sr.ModelID = modelID
+	}
+
+	if sr.CustomProperties == nil {
+		sr.CustomProperties = make(map[string]any)
+	}
+
+	maps.Copy(sr.CustomProperties, raw)
+
+	return nil
+}
+
 type PerformanceMetricsLoader struct {
 	path                  []string
 	modelRepo             dbmodels.CatalogModelRepository
@@ -135,6 +180,26 @@ type PerformanceMetricsLoader struct {
 	metricsArtifactTypeID int32
 	// Cache of lowercase model ID -> directory path for case-insensitive lookups
 	modelDirCache map[string]string
+}
+
+// UpdateRepos replaces the loader's cached repository references and type IDs
+// after a database reconnect. Safe to call from the OnBecomeLeader callback:
+// the elector drains all previous leader callbacks before invoking a new one,
+// so this always runs before NotifyLeader starts any leader-mode loading.
+func (pml *PerformanceMetricsLoader) UpdateRepos(modelRepo dbmodels.CatalogModelRepository, metricsArtifactRepo dbmodels.CatalogMetricsArtifactRepository, typeMap map[string]int32) error {
+	modelTypeID, exists := typeMap[service.CatalogModelTypeName]
+	if !exists {
+		return fmt.Errorf("CatalogModel type not found in type map")
+	}
+	metricsArtifactTypeID, exists := typeMap[service.CatalogMetricsArtifactTypeName]
+	if !exists {
+		return fmt.Errorf("CatalogMetricsArtifact type not found in type map")
+	}
+	pml.modelRepo = modelRepo
+	pml.metricsArtifactRepo = metricsArtifactRepo
+	pml.modelTypeID = modelTypeID
+	pml.metricsArtifactTypeID = metricsArtifactTypeID
+	return nil
 }
 
 func NewPerformanceMetricsLoader(path []string, modelRepo dbmodels.CatalogModelRepository, metricsArtifactRepo dbmodels.CatalogMetricsArtifactRepository, typeMap map[string]int32) (*PerformanceMetricsLoader, error) {
@@ -315,15 +380,16 @@ func processModelDirectory(dirPath string, modelRepo dbmodels.CatalogModelReposi
 	glog.V(2).Infof("Found existing model %s with ID %d, processing metrics", namespacedModelName, modelID)
 
 	// Use batch processing for all artifacts
-	return processModelArtifactsBatch(dirPath, modelID, metadata.ID, metadata.OverallAccuracy, metricsArtifactRepo, metricsArtifactTypeID)
+	return processModelArtifactsBatch(dirPath, modelID, metadata.ID, metadata.OverallAccuracy, metadata.ColdStartMatrix, metricsArtifactRepo, metricsArtifactTypeID)
 }
 
 // processModelArtifactsBatch processes all metric artifacts for a model in batch
 // This reduces DB overhead by parsing, checking, and inserting in optimized phases
-func processModelArtifactsBatch(dirPath string, modelID int32, modelName string, overallAccuracy *float64, metricsArtifactRepo dbmodels.CatalogMetricsArtifactRepository, metricsArtifactTypeID int32) (int, error) {
+func processModelArtifactsBatch(dirPath string, modelID int32, modelName string, overallAccuracy *float64, coldStartMatrix []coldStartEntry, metricsArtifactRepo dbmodels.CatalogMetricsArtifactRepository, metricsArtifactTypeID int32) (int, error) {
 	// Parse all metrics files
 	var evaluationRecords []evaluationRecord
 	var performanceRecords []performanceRecord
+	var securityRecords []securityEvaluationRecord
 
 	// Parse evaluation metrics if file exists
 	evaluationsPath := filepath.Join(dirPath, "evaluations.ndjson")
@@ -347,7 +413,18 @@ func processModelArtifactsBatch(dirPath string, modelID int32, modelName string,
 		}
 	}
 
-	totalRecords := len(evaluationRecords) + len(performanceRecords)
+	// Parse security evaluation metrics if file exists
+	securityPath := filepath.Join(dirPath, "security-evaluations.ndjson")
+	if _, err := os.Stat(securityPath); err == nil {
+		records, err := parseSecurityEvaluationFile(securityPath)
+		if err != nil {
+			glog.Errorf("Failed to parse security evaluations file for %s: %v", modelName, err)
+		} else {
+			securityRecords = records
+		}
+	}
+
+	totalRecords := len(evaluationRecords) + len(performanceRecords) + len(securityRecords) + len(coldStartMatrix)
 	if totalRecords == 0 {
 		return 0, nil
 	}
@@ -390,6 +467,37 @@ func processModelArtifactsBatch(dirPath string, modelID int32, modelName string,
 			artifactsToInsert = append(artifactsToInsert, artifact)
 		} else {
 			glog.V(2).Infof("Performance artifact %s already exists, skipping", perfRecord.ID)
+		}
+	}
+
+	// Check cold-start artifacts (one per GPU configuration from metadata.json)
+	for i, csEntry := range coldStartMatrix {
+		if csEntry.GPUType == "" || csEntry.GPUCount <= 0 {
+			glog.Warningf("Skipping cold-start entry %d for model %s: gpu_type and gpu_count (positive) are required", i, modelName)
+			continue
+		}
+		externalID := coldStartExternalID(modelID, csEntry)
+		if !existingArtifactsMap[externalID] {
+			artifact := createColdStartArtifact(csEntry, externalID, modelID, metricsArtifactTypeID)
+			artifactsToInsert = append(artifactsToInsert, artifact)
+		} else {
+			glog.V(2).Infof("Cold-start artifact %s already exists, skipping", externalID)
+		}
+	}
+
+	// Check security evaluation artifacts; deduplicate within the file before the DB check
+	seenSecurityIDs := make(map[string]bool, len(securityRecords))
+	for _, secRecord := range securityRecords {
+		if seenSecurityIDs[secRecord.ID] {
+			glog.Warningf("Duplicate security artifact ID %s in file, skipping", secRecord.ID)
+			continue
+		}
+		seenSecurityIDs[secRecord.ID] = true
+		if !existingArtifactsMap[secRecord.ID] {
+			artifact := createSecurityArtifact(secRecord, modelID, metricsArtifactTypeID, nil, nil)
+			artifactsToInsert = append(artifactsToInsert, artifact)
+		} else {
+			glog.V(2).Infof("Security artifact %s already exists, skipping", secRecord.ID)
 		}
 	}
 
@@ -578,7 +686,7 @@ func createPerformanceArtifact(perfRecord performanceRecord, modelID int32, type
 		}
 	}
 	if createTime == nil {
-		createTime = apiutils.Of(time.Now().UnixMilli())
+		createTime = new(time.Now().UnixMilli())
 	}
 
 	if updatedAtNum, ok := perfRecord.CustomProperties["updated_at"].(json.Number); ok {
@@ -590,7 +698,7 @@ func createPerformanceArtifact(perfRecord performanceRecord, modelID int32, type
 		}
 	}
 	if updateTime == nil {
-		updateTime = apiutils.Of(time.Now().UnixMilli())
+		updateTime = new(time.Now().UnixMilli())
 	}
 	delete(perfRecord.CustomProperties, "updated_at")
 	delete(perfRecord.CustomProperties, "created_at")
@@ -655,6 +763,176 @@ func createPerformanceArtifact(perfRecord performanceRecord, modelID int32, type
 	return metricsArtifact
 }
 
+func coldStartExternalID(modelID int32, entry coldStartEntry) string {
+	return fmt.Sprintf("cold-start-model-%d-%s-%d", modelID, entry.GPUType, entry.GPUCount)
+}
+
+// createColdStartArtifact creates a metrics artifact from a single cold-start matrix entry.
+// Each GPU configuration becomes its own artifact with discrete, filterable custom properties.
+func createColdStartArtifact(entry coldStartEntry, externalID string, modelID int32, typeID int32) *dbmodels.CatalogMetricsArtifactImpl {
+	artifactName := fmt.Sprintf("cold-start-model-%d-%s-%d", modelID, entry.GPUType, entry.GPUCount)
+
+	now := time.Now().UnixMilli()
+
+	gpuCount := int32(entry.GPUCount)
+	subType := "cold-start"
+	customProperties := []models.Properties{
+		{Name: "performance_sub_type", StringValue: &subType},
+		{Name: "gpu_type", StringValue: &entry.GPUType},
+		{Name: "gpu_count", IntValue: &gpuCount},
+	}
+
+	if entry.RuntimeCommand != "" {
+		customProperties = append(customProperties, models.Properties{
+			Name:        "runtime_command",
+			StringValue: &entry.RuntimeCommand,
+		})
+	}
+
+	if entry.ColdStartTimeToLoadSeconds != 0 {
+		seconds := entry.ColdStartTimeToLoadSeconds
+		customProperties = append(customProperties, models.Properties{
+			Name:        "cold_start_time_to_load_seconds",
+			DoubleValue: &seconds,
+		})
+	}
+
+	properties := []models.Properties{}
+
+	return &dbmodels.CatalogMetricsArtifactImpl{
+		TypeID: &typeID,
+		Attributes: &dbmodels.CatalogMetricsArtifactAttributes{
+			Name:                     &artifactName,
+			ExternalID:               &externalID,
+			CreateTimeSinceEpoch:     &now,
+			LastUpdateTimeSinceEpoch: &now,
+			MetricsType:              dbmodels.MetricsTypePerformance,
+		},
+		Properties:       &properties,
+		CustomProperties: &customProperties,
+	}
+}
+
+// parseSecurityEvaluationFile reads and parses a security-evaluations.ndjson file
+func parseSecurityEvaluationFile(filePath string) ([]securityEvaluationRecord, error) {
+	file, err := os.Open(filePath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open security evaluation file %s: %v", filePath, err)
+	}
+	defer file.Close()
+
+	scanner := bufio.NewScanner(file)
+	securityRecords := []securityEvaluationRecord{}
+
+	for scanner.Scan() {
+		line := scanner.Text()
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+
+		var secRecord securityEvaluationRecord
+		if err := json.Unmarshal([]byte(line), &secRecord); err != nil {
+			glog.Errorf("Failed to parse security evaluation record: %v", err)
+			continue
+		}
+
+		securityRecords = append(securityRecords, secRecord)
+	}
+
+	if err := scanner.Err(); err != nil {
+		return nil, fmt.Errorf("error reading security evaluation file: %v", err)
+	}
+
+	return securityRecords, nil
+}
+
+// createSecurityArtifact creates a metrics artifact from a security evaluation record
+func createSecurityArtifact(secRecord securityEvaluationRecord, modelID int32, typeID int32, existingID *int32, existingCreateTime *int64) *dbmodels.CatalogMetricsArtifactImpl {
+	artifactName := fmt.Sprintf("security-%s", secRecord.ID)
+
+	createTime := existingCreateTime
+	var updateTime *int64
+
+	if existingCreateTime == nil {
+		if createdAtNum, ok := secRecord.CustomProperties["created_at"].(json.Number); ok {
+			createdAt, err := createdAtNum.Int64()
+			if err == nil {
+				createTime = &createdAt
+			} else {
+				glog.Warningf("%s: invalid created_at value: %v", artifactName, err)
+			}
+		}
+	}
+	if createTime == nil {
+		createTime = new(time.Now().UnixMilli())
+	}
+
+	if updatedAtNum, ok := secRecord.CustomProperties["updated_at"].(json.Number); ok {
+		updatedAt, err := updatedAtNum.Int64()
+		if err == nil {
+			updateTime = &updatedAt
+		} else {
+			glog.Warningf("%s: invalid updated_at value: %v", artifactName, err)
+		}
+	}
+	if updateTime == nil {
+		updateTime = new(time.Now().UnixMilli())
+	}
+	delete(secRecord.CustomProperties, "updated_at")
+	delete(secRecord.CustomProperties, "created_at")
+
+	properties := []models.Properties{}
+	customProperties := []models.Properties{}
+
+	for key, value := range secRecord.CustomProperties {
+		prop := models.Properties{Name: key}
+
+		switch v := value.(type) {
+		case string:
+			prop.StringValue = &v
+		case float64:
+			prop.DoubleValue = &v
+		case int64:
+			prop.SetInt64Value(v)
+		case int:
+			intVal := int32(v)
+			prop.IntValue = &intVal
+		case bool:
+			prop.BoolValue = &v
+		case json.Number:
+			if n, err := v.Int64(); err == nil {
+				prop.SetInt64Value(n)
+			} else if f, err := v.Float64(); err == nil {
+				prop.DoubleValue = &f
+			} else {
+				strVal := v.String()
+				prop.StringValue = &strVal
+			}
+		default:
+			strVal := fmt.Sprintf("%v", v)
+			prop.StringValue = &strVal
+		}
+
+		customProperties = append(customProperties, prop)
+	}
+
+	metricsArtifact := &dbmodels.CatalogMetricsArtifactImpl{
+		ID:     existingID,
+		TypeID: &typeID,
+		Attributes: &dbmodels.CatalogMetricsArtifactAttributes{
+			Name:                     &artifactName,
+			ExternalID:               &secRecord.ID,
+			CreateTimeSinceEpoch:     createTime,
+			LastUpdateTimeSinceEpoch: updateTime,
+			MetricsType:              dbmodels.MetricsTypeSecurityMetrics,
+		},
+		Properties:       &properties,
+		CustomProperties: &customProperties,
+	}
+
+	return metricsArtifact
+}
+
 // enrichCatalogModelFromMetadata updates CatalogModel with additional fields from metadata.json
 func enrichCatalogModelFromMetadata(existingModel dbmodels.CatalogModel, metadata metadataJSON, modelRepo dbmodels.CatalogModelRepository) error {
 	// Build custom properties to add/update
@@ -682,6 +960,45 @@ func enrichCatalogModelFromMetadata(existingModel dbmodels.CatalogModel, metadat
 			StringValue:      metadata.VariantGroupID,
 			IsCustomProperty: true,
 		})
+	}
+
+	if metadata.MinVRAMGB != nil {
+		customProperties = append(customProperties, models.Properties{
+			Name:             "min_vram_gb",
+			DoubleValue:      metadata.MinVRAMGB,
+			IsCustomProperty: true,
+		})
+	}
+
+	if metadata.ModelcarImageSize != nil {
+		customProperties = append(customProperties, models.Properties{
+			Name:             "modelcar_image_size",
+			DoubleValue:      metadata.ModelcarImageSize,
+			IsCustomProperty: true,
+		})
+	}
+
+	if metadata.ModelcarImageSizeBytes != nil {
+		bytesAsDouble := float64(*metadata.ModelcarImageSizeBytes)
+		customProperties = append(customProperties, models.Properties{
+			Name:             "modelcar_image_size_bytes",
+			DoubleValue:      &bytesAsDouble,
+			IsCustomProperty: true,
+		})
+	}
+
+	if len(metadata.ColdStartMatrix) > 0 {
+		csJSON, err := json.Marshal(metadata.ColdStartMatrix)
+		if err != nil {
+			glog.Warningf("Failed to marshal cold_start_matrix for model: %v", err)
+		} else {
+			csStr := string(csJSON)
+			customProperties = append(customProperties, models.Properties{
+				Name:             "cold_start_matrix",
+				StringValue:      &csStr,
+				IsCustomProperty: true,
+			})
+		}
 	}
 
 	if len(customProperties) == 0 {

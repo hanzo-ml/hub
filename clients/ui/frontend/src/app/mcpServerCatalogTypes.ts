@@ -1,4 +1,4 @@
-import { PaginationParams } from './modelCatalogTypes';
+import { PaginationParams } from '~/app/shared/types/catalogTypes';
 
 export type McpDeploymentMode = 'local' | 'remote';
 
@@ -126,6 +126,7 @@ export type McpTool = {
 export type McpServer = {
   id: string;
   name: string;
+  displayName?: string;
   source_id?: string;
   description?: string;
   logo?: string;

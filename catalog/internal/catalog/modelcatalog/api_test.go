@@ -13,9 +13,7 @@ import (
 	"github.com/kubeflow/hub/catalog/internal/catalog/basecatalog"
 	"github.com/kubeflow/hub/catalog/internal/catalog/modelcatalog/models"
 	sharedmodels "github.com/kubeflow/hub/catalog/internal/db/models"
-	"github.com/kubeflow/hub/catalog/internal/db/service"
 	apimodels "github.com/kubeflow/hub/catalog/pkg/openapi"
-	"github.com/kubeflow/hub/internal/platform/apiutils"
 	mrmodels "github.com/kubeflow/hub/internal/platform/db/entity"
 	"github.com/stretchr/testify/assert"
 )
@@ -39,16 +37,14 @@ func TestLoadCatalogSources(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Create mock services
-			services := service.NewServices(
-				&MockCatalogModelRepository{},
-				&MockCatalogArtifactRepository{},
-				&MockCatalogModelArtifactRepository{},
-				&MockCatalogMetricsArtifactRepository{},
-				&MockCatalogSourceRepository{},
-				&MockPropertyOptionsRepository{},
-				nil, // MCPServerRepository
-				nil, // MCPServerToolRepository
-			)
+			services := Services{
+				CatalogModelRepository:           &MockCatalogModelRepository{},
+				CatalogArtifactRepository:        &MockCatalogArtifactRepository{},
+				CatalogModelArtifactRepository:   &MockCatalogModelArtifactRepository{},
+				CatalogMetricsArtifactRepository: &MockCatalogMetricsArtifactRepository{},
+				CatalogSourceRepository:          &MockCatalogSourceRepository{},
+				PropertyOptionsRepository:        &MockPropertyOptionsRepository{},
+			}
 			loader := NewModelLoader(services, basecatalog.NewBaseLoader([]string{tt.args.catalogsPath}))
 			// Parse config and populate Sources/Labels
 			err := loader.ParseAllConfigs()
@@ -103,16 +99,14 @@ func TestLoadCatalogSourcesEnabledDisabled(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Create mock services
-			services := service.NewServices(
-				&MockCatalogModelRepository{},
-				&MockCatalogArtifactRepository{},
-				&MockCatalogModelArtifactRepository{},
-				&MockCatalogMetricsArtifactRepository{},
-				&MockCatalogSourceRepository{},
-				&MockPropertyOptionsRepository{},
-				nil, // MCPServerRepository
-				nil, // MCPServerToolRepository
-			)
+			services := Services{
+				CatalogModelRepository:           &MockCatalogModelRepository{},
+				CatalogArtifactRepository:        &MockCatalogArtifactRepository{},
+				CatalogModelArtifactRepository:   &MockCatalogModelArtifactRepository{},
+				CatalogMetricsArtifactRepository: &MockCatalogMetricsArtifactRepository{},
+				CatalogSourceRepository:          &MockCatalogSourceRepository{},
+				PropertyOptionsRepository:        &MockPropertyOptionsRepository{},
+			}
 			loader := NewModelLoader(services, basecatalog.NewBaseLoader([]string{tt.args.catalogsPath}))
 			err := loader.ParseAllConfigs()
 			if (err != nil) != tt.wantErr {
@@ -132,16 +126,14 @@ func TestLoadCatalogSourcesEnabledDisabled(t *testing.T) {
 
 func TestLabelsValidation(t *testing.T) {
 	// Create mock services
-	services := service.NewServices(
-		&MockCatalogModelRepository{},
-		&MockCatalogArtifactRepository{},
-		&MockCatalogModelArtifactRepository{},
-		&MockCatalogMetricsArtifactRepository{},
-		&MockCatalogSourceRepository{},
-		&MockPropertyOptionsRepository{},
-		nil, // MCPServerRepository
-		nil, // MCPServerToolRepository
-	)
+	services := Services{
+		CatalogModelRepository:           &MockCatalogModelRepository{},
+		CatalogArtifactRepository:        &MockCatalogArtifactRepository{},
+		CatalogModelArtifactRepository:   &MockCatalogModelArtifactRepository{},
+		CatalogMetricsArtifactRepository: &MockCatalogMetricsArtifactRepository{},
+		CatalogSourceRepository:          &MockCatalogSourceRepository{},
+		PropertyOptionsRepository:        &MockPropertyOptionsRepository{},
+	}
 
 	tests := []struct {
 		name    string
@@ -265,16 +257,14 @@ func TestCatalogSourceLabelsDefaultToEmptySlice(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Create mock services
-			services := service.NewServices(
-				&MockCatalogModelRepository{},
-				&MockCatalogArtifactRepository{},
-				&MockCatalogModelArtifactRepository{},
-				&MockCatalogMetricsArtifactRepository{},
-				&MockCatalogSourceRepository{},
-				&MockPropertyOptionsRepository{},
-				nil, // MCPServerRepository
-				nil, // MCPServerToolRepository
-			)
+			services := Services{
+				CatalogModelRepository:           &MockCatalogModelRepository{},
+				CatalogArtifactRepository:        &MockCatalogArtifactRepository{},
+				CatalogModelArtifactRepository:   &MockCatalogModelArtifactRepository{},
+				CatalogMetricsArtifactRepository: &MockCatalogMetricsArtifactRepository{},
+				CatalogSourceRepository:          &MockCatalogSourceRepository{},
+				PropertyOptionsRepository:        &MockPropertyOptionsRepository{},
+			}
 			loader := NewModelLoader(services, basecatalog.NewBaseLoader([]string{tt.args.catalogsPath}))
 			err := loader.ParseAllConfigs()
 			if err != nil {
@@ -306,16 +296,14 @@ func TestLoadCatalogSourcesWithMockRepositories(t *testing.T) {
 	mockModelArtifactRepo := &MockCatalogModelArtifactRepository{}
 	mockMetricsArtifactRepo := &MockCatalogMetricsArtifactRepository{}
 
-	services := service.NewServices(
-		mockModelRepo,
-		mockArtifactRepo,
-		mockModelArtifactRepo,
-		mockMetricsArtifactRepo,
-		&MockCatalogSourceRepository{},
-		&MockPropertyOptionsRepository{},
-		nil, // MCPServerRepository
-		nil, // MCPServerToolRepository
-	)
+	services := Services{
+		CatalogModelRepository:           mockModelRepo,
+		CatalogArtifactRepository:        mockArtifactRepo,
+		CatalogModelArtifactRepository:   mockModelArtifactRepo,
+		CatalogMetricsArtifactRepository: mockMetricsArtifactRepo,
+		CatalogSourceRepository:          &MockCatalogSourceRepository{},
+		PropertyOptionsRepository:        &MockPropertyOptionsRepository{},
+	}
 
 	// Register a test provider that will create some test data
 	testProviderName := "test-provider"
@@ -367,7 +355,7 @@ func TestLoadCatalogSourcesWithMockRepositories(t *testing.T) {
 				CatalogSource: apimodels.CatalogSource{
 					Id:      "test-catalog",
 					Name:    "Test Catalog",
-					Enabled: apiutils.Of(true),
+					Enabled: new(true),
 				},
 				Type: testProviderName,
 				Properties: map[string]any{
@@ -447,16 +435,14 @@ func TestLoadCatalogSourcesWithRepositoryErrors(t *testing.T) {
 	mockModelArtifactRepo := &MockCatalogModelArtifactRepository{}
 	mockMetricsArtifactRepo := &MockCatalogMetricsArtifactRepository{}
 
-	services := service.NewServices(
-		mockModelRepo,
-		mockArtifactRepo,
-		mockModelArtifactRepo,
-		mockMetricsArtifactRepo,
-		&MockCatalogSourceRepository{},
-		&MockPropertyOptionsRepository{},
-		nil, // MCPServerRepository
-		nil, // MCPServerToolRepository
-	)
+	services := Services{
+		CatalogModelRepository:           mockModelRepo,
+		CatalogArtifactRepository:        mockArtifactRepo,
+		CatalogModelArtifactRepository:   mockModelArtifactRepo,
+		CatalogMetricsArtifactRepository: mockMetricsArtifactRepo,
+		CatalogSourceRepository:          &MockCatalogSourceRepository{},
+		PropertyOptionsRepository:        &MockPropertyOptionsRepository{},
+	}
 
 	// Register a test provider
 	testProviderName := "test-error-provider"
@@ -485,7 +471,7 @@ func TestLoadCatalogSourcesWithRepositoryErrors(t *testing.T) {
 				CatalogSource: apimodels.CatalogSource{
 					Id:      "test-catalog",
 					Name:    "Test Catalog",
-					Enabled: apiutils.Of(true),
+					Enabled: new(true),
 				},
 				Type: testProviderName,
 			},
@@ -525,16 +511,14 @@ func TestLoadCatalogSourcesWithNilEnabled(t *testing.T) {
 	mockModelArtifactRepo := &MockCatalogModelArtifactRepository{}
 	mockMetricsArtifactRepo := &MockCatalogMetricsArtifactRepository{}
 
-	services := service.NewServices(
-		mockModelRepo,
-		mockArtifactRepo,
-		mockModelArtifactRepo,
-		mockMetricsArtifactRepo,
-		&MockCatalogSourceRepository{},
-		&MockPropertyOptionsRepository{},
-		nil, // MCPServerRepository
-		nil, // MCPServerToolRepository
-	)
+	services := Services{
+		CatalogModelRepository:           mockModelRepo,
+		CatalogArtifactRepository:        mockArtifactRepo,
+		CatalogModelArtifactRepository:   mockModelArtifactRepo,
+		CatalogMetricsArtifactRepository: mockMetricsArtifactRepo,
+		CatalogSourceRepository:          &MockCatalogSourceRepository{},
+		PropertyOptionsRepository:        &MockPropertyOptionsRepository{},
+	}
 
 	// Register a test provider
 	testProviderName := "test-nil-enabled-provider"
@@ -993,6 +977,10 @@ func (m *MockCatalogArtifactRepository) DeleteByParentID(artifactType string, pa
 	return nil
 }
 
+func (m *MockCatalogArtifactRepository) CountByParentIDs(parentIDs []int32) (map[int32]map[string]int32, error) {
+	return make(map[int32]map[string]int32), nil
+}
+
 // MockNotFoundError represents an error when an entity is not found.
 type MockNotFoundError struct {
 	Entity string
@@ -1125,16 +1113,14 @@ func TestAPIProviderGetPerformanceArtifacts(t *testing.T) {
 	// The actual implementation is tested in db_catalog_test.go
 
 	// Create a mock provider to verify interface compliance
-	services := service.NewServices(
-		&MockCatalogModelRepository{},
-		&MockCatalogArtifactRepository{},
-		&MockCatalogModelArtifactRepository{},
-		&MockCatalogMetricsArtifactRepository{},
-		&MockCatalogSourceRepository{},
-		&MockPropertyOptionsRepository{},
-		nil, // MCPServerRepository
-		nil, // MCPServerToolRepository
-	)
+	services := Services{
+		CatalogModelRepository:           &MockCatalogModelRepository{},
+		CatalogArtifactRepository:        &MockCatalogArtifactRepository{},
+		CatalogModelArtifactRepository:   &MockCatalogModelArtifactRepository{},
+		CatalogMetricsArtifactRepository: &MockCatalogMetricsArtifactRepository{},
+		CatalogSourceRepository:          &MockCatalogSourceRepository{},
+		PropertyOptionsRepository:        &MockPropertyOptionsRepository{},
+	}
 	provider := NewDBCatalog(services, nil)
 
 	// Verify provider implements APIProvider interface with GetPerformanceArtifacts
@@ -1155,16 +1141,14 @@ func TestAPIProviderGetPerformanceArtifacts(t *testing.T) {
 // TestAPIProviderInterface verifies that the APIProvider interface supports
 // all required fields in ListPerformanceArtifactsParams
 func TestAPIProviderInterface(t *testing.T) {
-	services := service.NewServices(
-		&MockCatalogModelRepository{},
-		&MockCatalogArtifactRepository{},
-		&MockCatalogModelArtifactRepository{},
-		&MockCatalogMetricsArtifactRepository{},
-		&MockCatalogSourceRepository{},
-		&MockPropertyOptionsRepository{},
-		nil, // MCPServerRepository
-		nil, // MCPServerToolRepository
-	)
+	services := Services{
+		CatalogModelRepository:           &MockCatalogModelRepository{},
+		CatalogArtifactRepository:        &MockCatalogArtifactRepository{},
+		CatalogModelArtifactRepository:   &MockCatalogModelArtifactRepository{},
+		CatalogMetricsArtifactRepository: &MockCatalogMetricsArtifactRepository{},
+		CatalogSourceRepository:          &MockCatalogSourceRepository{},
+		PropertyOptionsRepository:        &MockPropertyOptionsRepository{},
+	}
 	var provider APIProvider = NewDBCatalog(services, nil)
 
 	params := ListPerformanceArtifactsParams{

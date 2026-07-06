@@ -8,7 +8,7 @@ import (
 	"time"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
-	"github.com/kubeflow/hub/catalog/internal/db/service"
+	"github.com/kubeflow/hub/catalog/internal/testhelpers"
 	"github.com/kubeflow/hub/catalog/internal/leader"
 	"github.com/kubeflow/hub/internal/testutils"
 	"github.com/stretchr/testify/assert"
@@ -20,7 +20,7 @@ func TestMain(m *testing.M) {
 }
 
 func TestLeaderElector_Run(t *testing.T) {
-	db, cleanup := testutils.SetupPostgresWithMigrations(t, service.DatastoreSpec())
+	db, cleanup := testutils.SetupPostgresWithMigrations(t, testhelpers.MustDatastoreSpec(t))
 	defer cleanup()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -66,7 +66,7 @@ func TestLeaderElector_Run(t *testing.T) {
 // - Only one pod becomes leader at a time
 // - When the leader releases the lock, another pod can acquire it
 func TestMultiPodLeaderElection(t *testing.T) {
-	db, cleanup := testutils.SetupPostgresWithMigrations(t, service.DatastoreSpec())
+	db, cleanup := testutils.SetupPostgresWithMigrations(t, testhelpers.MustDatastoreSpec(t))
 	defer cleanup()
 
 	// Use a longer timeout to account for container startup and leader transitions
@@ -165,7 +165,7 @@ func TestMultiPodLeaderElection(t *testing.T) {
 // TestLeaderElector_MultipleCallbacks verifies that multiple registered callbacks
 // are all invoked concurrently when leadership is acquired.
 func TestLeaderElector_MultipleCallbacks(t *testing.T) {
-	db, cleanup := testutils.SetupPostgresWithMigrations(t, service.DatastoreSpec())
+	db, cleanup := testutils.SetupPostgresWithMigrations(t, testhelpers.MustDatastoreSpec(t))
 	defer cleanup()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -227,7 +227,7 @@ func TestLeaderElector_MultipleCallbacks(t *testing.T) {
 // TestLeaderElector_CallbackPanic verifies that a panic in one callback
 // doesn't affect other callbacks or crash the leader elector.
 func TestLeaderElector_CallbackPanic(t *testing.T) {
-	db, cleanup := testutils.SetupPostgresWithMigrations(t, service.DatastoreSpec())
+	db, cleanup := testutils.SetupPostgresWithMigrations(t, testhelpers.MustDatastoreSpec(t))
 	defer cleanup()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -276,7 +276,7 @@ func TestLeaderElector_CallbackPanic(t *testing.T) {
 // leadership continues (keeps the lock) until context is cancelled.
 // This is the new behavior per the plan - no longer releases lock when callbacks exit.
 func TestLeaderElector_CallbackEarlyExit(t *testing.T) {
-	db, cleanup := testutils.SetupPostgresWithMigrations(t, service.DatastoreSpec())
+	db, cleanup := testutils.SetupPostgresWithMigrations(t, testhelpers.MustDatastoreSpec(t))
 	defer cleanup()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -321,7 +321,7 @@ func TestLeaderElector_CallbackEarlyExit(t *testing.T) {
 // TestLeaderElector_CallbackRegisteredAfterLeadership verifies that callbacks
 // registered after leadership is already acquired are invoked immediately.
 func TestLeaderElector_CallbackRegisteredAfterLeadership(t *testing.T) {
-	db, cleanup := testutils.SetupPostgresWithMigrations(t, service.DatastoreSpec())
+	db, cleanup := testutils.SetupPostgresWithMigrations(t, testhelpers.MustDatastoreSpec(t))
 	defer cleanup()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -382,7 +382,7 @@ func TestLeaderElector_CallbackRegisteredAfterLeadership(t *testing.T) {
 // TestLeaderElector_WaitReturnsCorrectError verifies that Wait() returns
 // the correct error from the background goroutine.
 func TestLeaderElector_WaitReturnsCorrectError(t *testing.T) {
-	db, cleanup := testutils.SetupPostgresWithMigrations(t, service.DatastoreSpec())
+	db, cleanup := testutils.SetupPostgresWithMigrations(t, testhelpers.MustDatastoreSpec(t))
 	defer cleanup()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -405,10 +405,86 @@ func TestLeaderElector_WaitReturnsCorrectError(t *testing.T) {
 	assert.ErrorIs(t, err, context.Canceled)
 }
 
+// TestRollingUpdateDoesNotDeadlock simulates a rolling update with replicas=1:
+//
+//  1. Old pod holds the leader lease and is healthy.
+//  2. New pod starts and attempts to acquire the lease.
+//  3. New pod cannot become leader (old pod holds the lease).
+//  4. New pod's Healthy() must return true (ErrNotAcquired proves DB is reachable).
+//  5. Kubernetes sees the new pod as ready, terminates the old pod.
+//  6. Old pod releases the lease on shutdown.
+//  7. New pod acquires the lease and becomes leader.
+//
+// Without the ErrNotAcquired fix, step 4 would return false → readiness probe
+// fails → Kubernetes never kills the old pod → deadlock.
+func TestRollingUpdateDoesNotDeadlock(t *testing.T) {
+	db, cleanup := testutils.SetupPostgresWithMigrations(t, testhelpers.MustDatastoreSpec(t))
+	defer cleanup()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	// --- Step 1: Old pod acquires the lease ---
+	oldCtx, oldCancel := context.WithCancel(ctx)
+	defer oldCancel()
+
+	var oldBecameLeader atomic.Bool
+	oldPod, err := leader.NewLeaderElector(db, oldCtx, "rolling-update-lock", 5*time.Second, 1*time.Second)
+	require.NoError(t, err)
+	oldPod.OnBecomeLeader(func(ctx context.Context) {
+		oldBecameLeader.Store(true)
+		<-ctx.Done()
+	})
+
+	require.Eventually(t, func() bool {
+		return oldBecameLeader.Load()
+	}, 3*time.Second, 100*time.Millisecond, "old pod should acquire leadership")
+	assert.True(t, oldPod.Healthy(), "old pod should be healthy")
+
+	// --- Step 2-3: New pod starts, cannot acquire (old pod holds lease) ---
+	newCtx, newCancel := context.WithCancel(ctx)
+	defer newCancel()
+
+	newPod, err := leader.NewLeaderElector(db, newCtx, "rolling-update-lock", 5*time.Second, 1*time.Second)
+	require.NoError(t, err)
+
+	// New pod starts unhealthy (cold start)
+	assert.False(t, newPod.Healthy(), "new pod should start unhealthy")
+
+	// --- Step 4: New pod gets ErrNotAcquired → becomes healthy ---
+	require.Eventually(t, func() bool {
+		return newPod.Healthy()
+	}, 5*time.Second, 100*time.Millisecond,
+		"new pod should become healthy while waiting for lease (ErrNotAcquired proves DB connectivity)")
+
+	// --- Step 5-6: Kubernetes terminates old pod (simulate with cancel) ---
+	t.Log("Simulating Kubernetes terminating old pod")
+	oldCancel()
+	err = oldPod.Wait()
+	assert.ErrorIs(t, err, context.Canceled)
+
+	// --- Step 7: New pod acquires leadership ---
+	var newBecameLeader atomic.Bool
+	newPod.OnBecomeLeader(func(ctx context.Context) {
+		newBecameLeader.Store(true)
+		<-ctx.Done()
+	})
+
+	require.Eventually(t, func() bool {
+		return newBecameLeader.Load()
+	}, 10*time.Second, 200*time.Millisecond, "new pod should acquire leadership after old pod is terminated")
+
+	assert.True(t, newPod.Healthy(), "new pod should remain healthy as leader")
+
+	newCancel()
+	err = newPod.Wait()
+	assert.ErrorIs(t, err, context.Canceled)
+}
+
 // TestLeaderElector_GoroutineStartsImmediately verifies that the background
 // goroutine starts immediately from the constructor.
 func TestLeaderElector_GoroutineStartsImmediately(t *testing.T) {
-	db, cleanup := testutils.SetupPostgresWithMigrations(t, service.DatastoreSpec())
+	db, cleanup := testutils.SetupPostgresWithMigrations(t, testhelpers.MustDatastoreSpec(t))
 	defer cleanup()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

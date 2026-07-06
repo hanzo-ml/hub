@@ -14,11 +14,13 @@ import (
 
 	"github.com/kubeflow/hub/catalog/internal/catalog"
 	"github.com/kubeflow/hub/catalog/internal/catalog/basecatalog"
+	"github.com/kubeflow/hub/catalog/internal/catalog/mcpcatalog"
 	"github.com/kubeflow/hub/catalog/internal/catalog/modelcatalog"
 	"github.com/kubeflow/hub/catalog/internal/db/models"
 	model "github.com/kubeflow/hub/catalog/pkg/openapi"
 	mrmodels "github.com/kubeflow/hub/internal/platform/db/entity"
 	"github.com/kubeflow/hub/pkg/api"
+	"k8s.io/apimachinery/pkg/util/yaml"
 )
 
 // ModelCatalogServiceAPIService is a service that implements the logic for the ModelCatalogServiceAPIServicer
@@ -28,6 +30,7 @@ type ModelCatalogServiceAPIService struct {
 	provider         catalog.APIProvider
 	sources          *catalog.SourceCollection
 	mcpSources       *catalog.MCPSourceCollection
+	agentSources     *catalog.AgentSourceCollection
 	labels           *catalog.LabelCollection
 	sourceRepository models.CatalogSourceRepository
 }
@@ -217,10 +220,24 @@ func (m *ModelCatalogServiceAPIService) FindLabels(ctx context.Context, assetTyp
 }
 
 func (m *ModelCatalogServiceAPIService) FindModels(ctx context.Context, recommended bool, targetRPS int32, latencyProperty string, rpsProperty string, hardwareCountProperty string, hardwareTypeProperty string, sourceIDs []string, q string, sourceLabels []string, filterQuery string, pageSize string, orderBy model.OrderByField, sortOrder model.SortOrder, nextPageToken string) (ImplResponse, error) {
-	// Validate pagination parameters
-	pageSizeInt, err := parsePaginationParams(pageSize, nextPageToken)
-	if err != nil {
-		return ErrorResponse(http.StatusBadRequest, err), err
+	// Validate pageSize and nextPageToken up-front. The recommended path uses numeric
+	// offset tokens; the non-recommended path uses base64-encoded DB cursors
+	// validated inside parsePaginationParams.
+	var pageSizeInt int32
+	var err error
+	if recommended || orderBy == model.ORDERBYFIELD_RECOMMENDED {
+		pageSizeInt, err = parsePageSize(pageSize)
+		if err != nil {
+			return ErrorResponse(http.StatusBadRequest, err), err
+		}
+		if tokenErr := validateRecommendedNextPageToken(nextPageToken); tokenErr != nil {
+			return ErrorResponse(http.StatusBadRequest, tokenErr), tokenErr
+		}
+	} else {
+		pageSizeInt, err = parsePaginationParams(pageSize, nextPageToken)
+		if err != nil {
+			return ErrorResponse(http.StatusBadRequest, err), err
+		}
 	}
 
 	if len(sourceIDs) == 1 && sourceIDs[0] == "" {
@@ -250,8 +267,8 @@ func (m *ModelCatalogServiceAPIService) FindModels(ctx context.Context, recommen
 		}
 	}
 
-	// Handle recommended latency sorting
-	if recommended {
+	// Handle recommended latency sorting (triggered by recommendations=true or orderBy=RECOMMENDED)
+	if recommended || orderBy == model.ORDERBYFIELD_RECOMMENDED {
 		// Build Pareto filtering parameters with defaults
 		var targetRPSPtr *int32
 		if targetRPS != 0 {
@@ -292,10 +309,10 @@ func (m *ModelCatalogServiceAPIService) FindModels(ctx context.Context, recommen
 			FilterQuery:   &filterQuery,
 		}
 
-		// Use recommended latency sorting (ignores orderBy)
-		models, err := m.provider.FindModelsWithRecommendedLatency(ctx, pagination, paretoParams, sourceIDs, q)
+		// Use recommended latency sorting
+		models, err := m.provider.FindModelsWithRecommendedLatency(ctx, pagination, paretoParams, sourceIDs, q, string(sortOrder))
 		if err != nil {
-			return ErrorResponse(http.StatusInternalServerError, fmt.Errorf("failed to find models with recommended latency: %w", err)), err
+			return ErrorResponse(api.ErrToStatus(err), fmt.Errorf("failed to find models with recommended latency: %w", err)), err
 		}
 
 		return Response(http.StatusOK, *models), nil
@@ -318,7 +335,7 @@ func (m *ModelCatalogServiceAPIService) FindModels(ctx context.Context, recommen
 
 	models, err := m.provider.ListModels(ctx, listModelsParams)
 	if err != nil {
-		return ErrorResponse(http.StatusInternalServerError, err), err
+		return ErrorResponse(api.ErrToStatus(err), err), err
 	}
 
 	return Response(http.StatusOK, models), nil
@@ -364,6 +381,12 @@ func (m *ModelCatalogServiceAPIService) FindSources(ctx context.Context, name st
 	if m.mcpSources != nil {
 		for id, mcpSrc := range m.mcpSources.AllSources() {
 			sources[id] = mcpSourceToCatalogSource(mcpSrc)
+		}
+	}
+
+	if m.agentSources != nil {
+		for id, agentSrc := range m.agentSources.AllSources() {
+			sources[id] = agentSourceToCatalogSource(agentSrc)
 		}
 	}
 
@@ -458,15 +481,20 @@ func mcpSourceToCatalogSource(src basecatalog.MCPSource) model.CatalogSource {
 	return cs
 }
 
+func agentSourceToCatalogSource(src basecatalog.PluginSource) model.CatalogSource {
+	assetType := model.CATALOGASSETTYPE_AGENTS
+	return model.CatalogSource{
+		Id:        src.ID,
+		Name:      src.Name,
+		Enabled:   src.Enabled,
+		Labels:    src.Labels,
+		AssetType: &assetType,
+	}
+}
+
 func (m *ModelCatalogServiceAPIService) PreviewCatalogSource(ctx context.Context, configParam *os.File, pageSizeParam string, nextPageTokenParam string, filterStatusParam string, catalogDataParam *os.File) (ImplResponse, error) {
-	// Parse page size
-	pageSize := int32(10)
-	if pageSizeParam != "" {
-		parsed, err := strconv.ParseInt(pageSizeParam, 10, 32)
-		if err != nil {
-			return ErrorResponse(http.StatusBadRequest, fmt.Errorf("invalid pageSize: %w", err)), err
-		}
-		pageSize = int32(parsed)
+	if _, err := parsePageSize(pageSizeParam); err != nil {
+		return ErrorResponse(http.StatusBadRequest, err), err
 	}
 
 	// Parse filterStatus (default: "all")
@@ -501,68 +529,129 @@ func (m *ModelCatalogServiceAPIService) PreviewCatalogSource(ctx context.Context
 		}
 	}
 
-	// Parse the config as a preview request
+	// Detect assetType from config to determine the preview path
+	var assetTypeProbe struct {
+		AssetType string `json:"assetType" yaml:"assetType"`
+	}
+	// Ignore errors — missing assetType defaults to models
+	_ = yaml.Unmarshal(configBytes, &assetTypeProbe)
+
+	if assetTypeProbe.AssetType == string(model.CATALOGASSETTYPE_MCP_SERVERS) {
+		return m.previewMCPSource(ctx, configBytes, catalogDataBytes, pageSizeParam, nextPageTokenParam, filterStatus)
+	}
+
+	return m.previewModelSource(ctx, configBytes, catalogDataBytes, pageSizeParam, nextPageTokenParam, filterStatus)
+}
+
+type previewPage[T model.Sortable] struct {
+	items         []T
+	total         int32
+	includedCount int32
+	excludedCount int32
+	nextPageToken string
+	pageSize      int32
+}
+
+func filterAndPaginate[T model.Sortable](results []T, isIncluded func(T) bool, filterStatus, pageSizeParam, nextPageTokenParam string) (*previewPage[T], error) {
+	var filtered []T
+	var includedCount, excludedCount int32
+	for _, r := range results {
+		if isIncluded(r) {
+			includedCount++
+		} else {
+			excludedCount++
+		}
+		switch filterStatus {
+		case "included":
+			if isIncluded(r) {
+				filtered = append(filtered, r)
+			}
+		case "excluded":
+			if !isIncluded(r) {
+				filtered = append(filtered, r)
+			}
+		default:
+			filtered = append(filtered, r)
+		}
+	}
+
+	p, err := newPaginator[T](pageSizeParam, model.OrderByField(""), model.SortOrder(""), nextPageTokenParam)
+	if err != nil {
+		return nil, err
+	}
+
+	paged, next := p.Paginate(filtered)
+
+	pageSize, _ := parsePageSize(pageSizeParam)
+
+	return &previewPage[T]{
+		items:         paged,
+		total:         int32(len(results)),
+		includedCount: includedCount,
+		excludedCount: excludedCount,
+		nextPageToken: next.Token(),
+		pageSize:      pageSize,
+	}, nil
+}
+
+func (m *ModelCatalogServiceAPIService) previewModelSource(ctx context.Context, configBytes, catalogDataBytes []byte, pageSizeParam, nextPageTokenParam, filterStatus string) (ImplResponse, error) {
 	previewRequest, err := catalog.ParsePreviewConfig(configBytes)
 	if err != nil {
 		return ErrorResponse(http.StatusUnprocessableEntity, fmt.Errorf("invalid config: %w", err)), err
 	}
 
-	// Load models using the preview service
 	previewResults, err := catalog.PreviewSourceModels(ctx, previewRequest, catalogDataBytes)
 	if err != nil {
 		return ErrorResponse(http.StatusUnprocessableEntity, fmt.Errorf("failed to load models: %w", err)), err
 	}
 
-	// Filter by status
-	var filteredResults []model.ModelPreviewResult
-	for _, result := range previewResults {
-		switch filterStatus {
-		case "included":
-			if result.Included {
-				filteredResults = append(filteredResults, result)
-			}
-		case "excluded":
-			if !result.Included {
-				filteredResults = append(filteredResults, result)
-			}
-		default: // "all"
-			filteredResults = append(filteredResults, result)
-		}
-	}
-
-	// Calculate summary from ALL results (not filtered)
-	var includedCount, excludedCount int32
-	for _, result := range previewResults {
-		if result.Included {
-			includedCount++
-		} else {
-			excludedCount++
-		}
-	}
-
-	summary := model.CatalogSourcePreviewResponseAllOfSummary{
-		TotalModels:    int32(len(previewResults)),
-		IncludedModels: includedCount,
-		ExcludedModels: excludedCount,
-	}
-
-	// Apply pagination
-	paginator, err := newPaginator[model.ModelPreviewResult](pageSizeParam, model.OrderByField(""), model.SortOrder(""), nextPageTokenParam)
+	page, err := filterAndPaginate(previewResults, func(r model.ModelPreviewResult) bool { return r.Included }, filterStatus, pageSizeParam, nextPageTokenParam)
 	if err != nil {
 		return ErrorResponse(http.StatusBadRequest, err), err
 	}
 
-	pagedResults, next := paginator.Paginate(filteredResults)
+	return Response(http.StatusOK, model.CatalogSourcePreviewResponse{
+		AssetType:     model.CATALOGASSETTYPE_MODELS,
+		PageSize:      page.pageSize,
+		Size:          int32(len(page.items)),
+		NextPageToken: page.nextPageToken,
+		Items:         page.items,
+		Summary: model.CatalogSourcePreviewResponseAllOfSummary{
+			TotalModels:    page.total,
+			IncludedModels: page.includedCount,
+			ExcludedModels: page.excludedCount,
+		},
+	}), nil
+}
 
-	response := model.CatalogSourcePreviewResponse{
-		PageSize:      pageSize,
-		Size:          int32(len(pagedResults)),
-		NextPageToken: next.Token(),
-		Items:         pagedResults,
-		Summary:       summary,
+func (m *ModelCatalogServiceAPIService) previewMCPSource(ctx context.Context, configBytes, catalogDataBytes []byte, pageSizeParam, nextPageTokenParam, filterStatus string) (ImplResponse, error) {
+	previewRequest, err := mcpcatalog.ParseMCPPreviewConfig(configBytes)
+	if err != nil {
+		return ErrorResponse(http.StatusUnprocessableEntity, fmt.Errorf("invalid config: %w", err)), err
 	}
 
-	return Response(http.StatusOK, response), nil
+	previewResults, err := mcpcatalog.PreviewSourceServers(ctx, previewRequest, catalogDataBytes)
+	if err != nil {
+		return ErrorResponse(http.StatusUnprocessableEntity, fmt.Errorf("failed to load servers: %w", err)), err
+	}
+
+	page, err := filterAndPaginate(previewResults, func(r model.AssetPreviewResult) bool { return r.Included }, filterStatus, pageSizeParam, nextPageTokenParam)
+	if err != nil {
+		return ErrorResponse(http.StatusBadRequest, err), err
+	}
+
+	return Response(http.StatusOK, model.AssetSourcePreviewResponse{
+		AssetType:     model.CATALOGASSETTYPE_MCP_SERVERS,
+		PageSize:      page.pageSize,
+		Size:          int32(len(page.items)),
+		NextPageToken: page.nextPageToken,
+		Items:         page.items,
+		Summary: model.AssetSourcePreviewResponseAllOfSummary{
+			TotalAssets:    page.total,
+			IncludedAssets: page.includedCount,
+			ExcludedAssets: page.excludedCount,
+		},
+	}), nil
 }
 
 func genCatalogCmpFunc(orderBy model.OrderByField, sortOrder model.SortOrder) (func(model.CatalogSource, model.CatalogSource) int, error) {
@@ -674,11 +763,12 @@ func genLabelCmpFunc(orderByKey string, sortOrder model.SortOrder) func(sortable
 var _ ModelCatalogServiceAPIServicer = &ModelCatalogServiceAPIService{}
 
 // NewModelCatalogServiceAPIService creates a default api service
-func NewModelCatalogServiceAPIService(provider catalog.APIProvider, sources *catalog.SourceCollection, mcpSources *catalog.MCPSourceCollection, labels *catalog.LabelCollection, sourceRepository models.CatalogSourceRepository) ModelCatalogServiceAPIServicer {
+func NewModelCatalogServiceAPIService(provider catalog.APIProvider, sources *catalog.SourceCollection, mcpSources *catalog.MCPSourceCollection, agentSources *catalog.AgentSourceCollection, labels *catalog.LabelCollection, sourceRepository models.CatalogSourceRepository) ModelCatalogServiceAPIServicer {
 	return &ModelCatalogServiceAPIService{
 		provider:         provider,
 		sources:          sources,
 		mcpSources:       mcpSources,
+		agentSources:     agentSources,
 		labels:           labels,
 		sourceRepository: sourceRepository,
 	}

@@ -17,7 +17,8 @@ import {
 import { mockCatalogPerformanceMetricsArtifactList } from '~/__mocks__/mockCatalogModelArtifactList';
 import { mockCatalogFilterOptionsList } from '~/__mocks__/mockCatalogFilterOptionsList';
 import { mockModelRegistry } from '~/__mocks__/mockModelRegistry';
-import type { CatalogLabelList, CatalogModel, CatalogSource } from '~/app/modelCatalogTypes';
+import type { CatalogLabelList, CatalogSource } from '~/app/shared/types/catalogTypes';
+import type { CatalogModel } from '~/app/modelCatalogTypes';
 import type { ModelRegistryCustomProperties } from '~/app/types';
 import { ModelRegistryMetadataType } from '~/app/types';
 import { MODEL_CATALOG_API_VERSION } from '~/__tests__/cypress/cypress/support/commands/api';
@@ -99,6 +100,10 @@ export const createMockModelsForLabel = (
               metadataType: ModelRegistryMetadataType.STRING,
               string_value: '',
             },
+            validated_on: {
+              metadataType: ModelRegistryMetadataType.STRING,
+              string_value: '["rhoai-3.5","vllm 0.20.0 - CUDA"]',
+            },
           } as ModelRegistryCustomProperties)
         : undefined;
       const name = isValidated ? 'validated-model' : `${label.toLowerCase()}-model-${i + 1}`;
@@ -111,7 +116,9 @@ export const createMockModelsForLabel = (
           validatedTasks: [ValidatedConfiguration.TOOL_CALLING],
           servingConfig: {
             toolCalling: {
-              args: '--enable-auto-tool-choice \\\n--tool-call-parser granite \\\n--chat-template\nopt/app-root/template/tool_chat_template_granite.jinja',
+              toolCallParser: 'granite',
+              chatTemplate: 'opt/app-root/template/tool_chat_template_granite.jinja',
+              enableAutoToolChoice: true,
             },
           },
         }),
@@ -165,6 +172,10 @@ export const interceptAllModels = (modelsPerCategory: number, useValidatedModel:
               metadataType: ModelRegistryMetadataType.STRING,
               string_value: '',
             },
+            validated_on: {
+              metadataType: ModelRegistryMetadataType.STRING,
+              string_value: '["rhoai-3.5","vllm 0.20.0 - CUDA"]',
+            },
           } as ModelRegistryCustomProperties)
         : undefined;
       const name = isValidated ? 'validated-model' : `all-models-model-${i + 1}`;
@@ -176,7 +187,9 @@ export const interceptAllModels = (modelsPerCategory: number, useValidatedModel:
           validatedTasks: [ValidatedConfiguration.TOOL_CALLING],
           servingConfig: {
             toolCalling: {
-              args: '--enable-auto-tool-choice \\\n--tool-call-parser granite \\\n--chat-template\nopt/app-root/template/tool_chat_template_granite.jinja',
+              toolCallParser: 'granite',
+              chatTemplate: 'opt/app-root/template/tool_chat_template_granite.jinja',
+              enableAutoToolChoice: true,
             },
           },
         }),

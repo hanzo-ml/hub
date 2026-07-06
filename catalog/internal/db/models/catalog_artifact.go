@@ -3,8 +3,8 @@ package models
 import (
 	"sync"
 
-	dbfilter "github.com/kubeflow/hub/internal/platform/db/filter"
 	models "github.com/kubeflow/hub/internal/platform/db/entity"
+	dbfilter "github.com/kubeflow/hub/internal/platform/db/filter"
 	"github.com/kubeflow/hub/internal/platform/db/schema"
 )
 
@@ -24,7 +24,7 @@ func (c *CatalogArtifactListOptions) GetRestEntityType() dbfilter.RestEntityType
 }
 
 // ArtifactMapperFunc defines the signature for artifact mapping functions
-type ArtifactMapperFunc func(artifact schema.Artifact, properties []schema.ArtifactProperty) interface{}
+type ArtifactMapperFunc func(artifact schema.Artifact, properties []schema.ArtifactProperty) any
 
 // Global registry for artifact mappers
 var (
@@ -74,4 +74,9 @@ type CatalogArtifactRepository interface {
 	GetByID(id int32) (CatalogArtifact, error)
 	List(listOptions CatalogArtifactListOptions) (*models.ListWrapper[CatalogArtifact], error)
 	DeleteByParentID(artifactType string, parentResourceID int32) error
+	// CountByParentIDs returns artifact counts grouped by category for each parent model ID.
+	// The outer map key is the parent model ID; the inner map key is the artifact category
+	// ("model-artifact", "performance-metrics", "accuracy-metrics", "security-metrics").
+	// Categories with zero count are omitted. Parents with no artifacts have no entry.
+	CountByParentIDs(parentIDs []int32) (map[int32]map[string]int32, error)
 }

@@ -3,11 +3,13 @@ package plugin
 import (
 	"context"
 	"flag"
+	"log/slog"
 
+	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/go-chi/chi/v5"
 	"gorm.io/gorm"
 
-	"github.com/kubeflow/hub/catalog/internal/catalog/basecatalog"
+	"github.com/kubeflow/hub/internal/platform/datastore"
 )
 
 // CatalogPlugin defines the interface that all catalog plugins must implement.
@@ -40,7 +42,8 @@ type CatalogPlugin interface {
 	Healthy() bool
 
 	// RegisterRoutes mounts the plugin's HTTP routes on the provided router.
-	// The router is already scoped to the plugin's base path.
+	// The router is the server's root router; plugins are responsible for
+	// using full path patterns (e.g., "/api/model_catalog/v1alpha1/models").
 	RegisterRoutes(router chi.Router) error
 
 	// Migrations returns database migrations for this plugin.
@@ -68,6 +71,43 @@ type FlagProvider interface {
 	RegisterFlags(fs *flag.FlagSet)
 }
 
+// LeaderAware is an optional interface that plugins can implement
+// to receive leadership notifications. When the pod becomes leader,
+// the server calls OnBecomeLeader. The implementation should block
+// until ctx is cancelled (leadership lost).
+type LeaderAware interface {
+	OnBecomeLeader(ctx context.Context) error
+}
+
+// SourceIDProvider is an optional interface that plugins can implement
+// to expose their known source IDs. Used during leader operations to
+// collect the union of all source IDs across plugins, preventing
+// cross-contamination when cleaning up shared CatalogSource records.
+type SourceIDProvider interface {
+	KnownSourceIDs() mapset.Set[string]
+}
+
+// DatastoreSpecProvider is an optional interface that plugins implement
+// to contribute their entity types to the shared DatastoreSpec.
+// This avoids modifying spec.go when adding a new plugin.
+type DatastoreSpecProvider interface {
+	DatastoreEntries() []DatastoreEntry
+}
+
+// Reconnectable is an optional interface that plugins can implement
+// to refresh their cached repository references and type IDs after
+// the database has been recreated (e.g., after emptyDir data loss recovery).
+type Reconnectable interface {
+	Reconnect(ctx context.Context, cfg Config) error
+}
+
+// DatastoreEntry describes a single entity type contributed by a plugin.
+type DatastoreEntry struct {
+	TypeName string
+	Category string // "context", "artifact", or "execution"
+	Spec     *datastore.SpecType
+}
+
 // CatalogLoader defines the interface for data loading strategies.
 type CatalogLoader interface {
 	Start(ctx context.Context) error
@@ -84,15 +124,6 @@ type Migration struct {
 
 // Config is passed to each plugin during Init.
 type Config struct {
-	// SourceConfig is the parsed sources.yaml configuration.
-	// Plugins use basecatalog methods (GetModelCatalogs, etc.) to extract
-	// their relevant sections.
-	//
-	// This couples plugins to basecatalog's schema — adding a new catalog type
-	// requires extending SourceConfig. Full decoupling (plugin-defined config
-	// types with raw YAML routing) is a server orchestration concern.
-	SourceConfig *basecatalog.SourceConfig
-
 	// DB is the shared database connection.
 	DB *gorm.DB
 
@@ -101,4 +132,13 @@ type Config struct {
 
 	// ConfigPaths are the paths to all sources.yaml files being used.
 	ConfigPaths []string
+
+	// RepoSet is the shared set of repositories from the datastore.
+	RepoSet datastore.RepoSet
+
+	// PerformanceMetricsPath holds paths to performance metrics data directories.
+	PerformanceMetricsPath []string
+
+	// Logger is a structured logger scoped to this plugin.
+	Logger *slog.Logger
 }

@@ -240,7 +240,8 @@ type ApiFindModelsRequest struct {
 	nextPageToken         *string
 }
 
-// Sort models by lowest recommended latency using Pareto filtering
+// Deprecated: use &#x60;orderBy&#x3D;RECOMMENDED&#x60; instead. Sort models by lowest recommended latency using Pareto filtering.
+// Deprecated
 func (r ApiFindModelsRequest) Recommendations(recommendations bool) ApiFindModelsRequest {
 	r.recommendations = &recommendations
 	return r
@@ -306,7 +307,7 @@ func (r ApiFindModelsRequest) PageSize(pageSize string) ApiFindModelsRequest {
 	return r
 }
 
-// Specifies the order by criteria for listing entities.  Supported values are: - CREATE_TIME - LAST_UPDATE_TIME - ID - NAME - ACCURACY  Defaults to &#x60;NAME&#x60;.  The &#x60;ACCURACY&#x60; sort will sort by the &#x60;overall_average&#x60; property in any linked metrics artifact.  In addition, models can be sorted by properties. For example: - &#x60;provider.string_value&#x60; sorts by provider name - &#x60;artifacts.ifeval.double_value&#x60; sorts by the min/max value a property called ifeval across all associated artifacts
+// Specifies the order by criteria for listing entities.  Supported values are: - CREATE_TIME - LAST_UPDATE_TIME - ID - NAME - ACCURACY - RECOMMENDED  Defaults to &#x60;NAME&#x60;.  The &#x60;ACCURACY&#x60; sort will sort by the &#x60;overall_average&#x60; property in any linked metrics artifact.  The &#x60;RECOMMENDED&#x60; sort applies Pareto filtering and ranks models by recommended latency. The Pareto-related parameters (&#x60;targetRPS&#x60;, &#x60;latencyProperty&#x60;, &#x60;rpsProperty&#x60;, &#x60;hardwareCountProperty&#x60;, &#x60;hardwareTypeProperty&#x60;) are applied the same way as with the deprecated &#x60;recommendations&#x60; parameter. With the default &#x60;sortOrder&#x3D;ASC&#x60;, the most recommended models (lowest latency) appear first. Use &#x60;sortOrder&#x3D;DESC&#x60; to show the least recommended configurations first.  In addition, models can be sorted by properties. For example: - &#x60;provider.string_value&#x60; sorts by provider name - &#x60;artifacts.ifeval.double_value&#x60; sorts by the min/max value a property called ifeval across all associated artifacts
 func (r ApiFindModelsRequest) OrderBy(orderBy OrderByField) ApiFindModelsRequest {
 	r.orderBy = &orderBy
 	return r
@@ -1516,7 +1517,7 @@ type ApiPreviewCatalogSourceRequest struct {
 	catalogData   *os.File
 }
 
-// YAML file containing the catalog source configuration. The file should contain a source definition with type and properties fields, including optional includedModels and excludedModels filters.  Model filter patterns support the &#x60;*&#x60; wildcard only and are case-insensitive. Patterns match the entire model name (e.g., &#x60;ibm-granite/_*&#x60; matches all models starting with \\\&quot;ibm-granite/\\\&quot;).
+// YAML file containing the catalog source configuration. The file should contain a source definition with &#x60;type&#x60; and &#x60;properties&#x60; fields, and an optional &#x60;assetType&#x60; field to specify the kind of assets being previewed (defaults to &#x60;models&#x60;).  **For model sources** (&#x60;assetType: models&#x60; or omitted): Use &#x60;includedModels&#x60; and &#x60;excludedModels&#x60; filter patterns.  **For MCP server sources** (&#x60;assetType: mcp_servers&#x60;): Use &#x60;includedServers&#x60; and &#x60;excludedServers&#x60; filter patterns.  Filter patterns support the &#x60;*&#x60; wildcard only and are case-insensitive. Patterns match the entire asset name (e.g., &#x60;ibm-granite/_*&#x60; matches all models starting with \\\&quot;ibm-granite/\\\&quot;, &#x60;kubernetes*&#x60; matches all servers starting with \\\&quot;kubernetes\\\&quot;).
 func (r ApiPreviewCatalogSourceRequest) Config(config *os.File) ApiPreviewCatalogSourceRequest {
 	r.config = config
 	return r
@@ -1534,38 +1535,44 @@ func (r ApiPreviewCatalogSourceRequest) NextPageToken(nextPageToken string) ApiP
 	return r
 }
 
-// Filter the response to show specific model statuses: - &#x60;all&#x60; (default): Show all models regardless of inclusion status - &#x60;included&#x60;: Show only models that pass the configured filters - &#x60;excluded&#x60;: Show only models that are filtered out
+// Filter the response to show specific asset statuses: - &#x60;all&#x60; (default): Show all assets regardless of inclusion status - &#x60;included&#x60;: Show only assets that pass the configured filters - &#x60;excluded&#x60;: Show only assets that are filtered out
 func (r ApiPreviewCatalogSourceRequest) FilterStatus(filterStatus string) ApiPreviewCatalogSourceRequest {
 	r.filterStatus = &filterStatus
 	return r
 }
 
-// Optional YAML file containing the catalog data (models).  This field enables stateless preview of new sources before saving them. When provided, the catalog data is read directly from this file instead of from the &#x60;yamlCatalogPath&#x60; property in the config.  **Two modes of operation:** 1. **Stateless mode (recommended for new sources):** Upload both &#x60;config&#x60; and    &#x60;catalogData&#x60; files. The models are read from &#x60;catalogData&#x60;, allowing preview    without saving anything to the server. 2. **Path mode (for existing sources):** Upload only &#x60;config&#x60; with a &#x60;yamlCatalogPath&#x60;    property pointing to a catalog file on the server filesystem.  If both &#x60;catalogData&#x60; and &#x60;yamlCatalogPath&#x60; are provided, &#x60;catalogData&#x60; takes precedence.
+// Optional YAML file containing the catalog data.  For model sources, the file should contain a &#x60;models:&#x60; key with a list of model entries. For MCP server sources, the file should contain an &#x60;mcp_servers:&#x60; key with a list of server entries.  This field enables stateless preview of new sources before saving them. When provided, the catalog data is read directly from this file instead of from the &#x60;yamlCatalogPath&#x60; property in the config.  **Two modes of operation:** 1. **Stateless mode (recommended for new sources):** Upload both &#x60;config&#x60; and    &#x60;catalogData&#x60; files. The assets are read from &#x60;catalogData&#x60;, allowing preview    without saving anything to the server. 2. **Path mode (for existing sources):** Upload only &#x60;config&#x60; with a &#x60;yamlCatalogPath&#x60;    property pointing to a catalog file on the server filesystem.  If both &#x60;catalogData&#x60; and &#x60;yamlCatalogPath&#x60; are provided, &#x60;catalogData&#x60; takes precedence.
 func (r ApiPreviewCatalogSourceRequest) CatalogData(catalogData *os.File) ApiPreviewCatalogSourceRequest {
 	r.catalogData = catalogData
 	return r
 }
 
-func (r ApiPreviewCatalogSourceRequest) Execute() (*CatalogSourcePreviewResponse, *http.Response, error) {
+func (r ApiPreviewCatalogSourceRequest) Execute() (*PreviewCatalogSourceResponse, *http.Response, error) {
 	return r.ApiService.PreviewCatalogSourceExecute(r)
 }
 
 /*
 PreviewCatalogSource Preview catalog source configuration
 
-Accepts a catalog source configuration and returns a list of models showing
+Accepts a catalog source configuration and returns a list of assets showing
 which would be included or excluded based on the configured filters. This allows
 users to test and validate their source configurations before applying them.
+
+The response type varies based on the `assetType` field in the uploaded config:
+  - `models` (default): Returns a `CatalogSourcePreviewResponse` with `ModelPreviewResult` items
+    and model-specific summary fields (`totalModels`, `includedModels`, `excludedModels`).
+  - `mcp_servers`: Returns an `AssetSourcePreviewResponse` with `AssetPreviewResult` items
+    and generic summary fields (`totalAssets`, `includedAssets`, `excludedAssets`).
 
 **Two modes of operation:**
 
  1. **Stateless mode (recommended for new sources):** Upload both `config` and
-    `catalogData` files via multipart form. The models are read directly from
+    `catalogData` files via multipart form. The assets are read directly from
     the uploaded `catalogData`, enabling preview of new sources before saving
     anything to the server. This is ideal for testing configurations.
 
  2. **Path mode (for existing sources):** Upload only `config` with a `yamlCatalogPath`
-    property. The models are read from the specified file path on the server.
+    property. The assets are read from the specified file path on the server.
     Use this for previewing changes to existing saved sources.
 
     @param ctx context.Context - for authentication, logging, cancellation, deadlines, tracing, etc. Passed from http.Request or context.Background().
@@ -1580,13 +1587,13 @@ func (a *ModelCatalogServiceAPIService) PreviewCatalogSource(ctx context.Context
 
 // Execute executes the request
 //
-//	@return CatalogSourcePreviewResponse
-func (a *ModelCatalogServiceAPIService) PreviewCatalogSourceExecute(r ApiPreviewCatalogSourceRequest) (*CatalogSourcePreviewResponse, *http.Response, error) {
+//	@return PreviewCatalogSourceResponse
+func (a *ModelCatalogServiceAPIService) PreviewCatalogSourceExecute(r ApiPreviewCatalogSourceRequest) (*PreviewCatalogSourceResponse, *http.Response, error) {
 	var (
 		localVarHTTPMethod  = http.MethodPost
 		localVarPostBody    interface{}
 		formFiles           []formFile
-		localVarReturnValue *CatalogSourcePreviewResponse
+		localVarReturnValue *PreviewCatalogSourceResponse
 	)
 
 	localBasePath, err := a.client.cfg.ServerURLWithContext(r.ctx, "ModelCatalogServiceAPIService.PreviewCatalogSource")

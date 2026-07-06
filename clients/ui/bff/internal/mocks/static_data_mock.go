@@ -9,9 +9,9 @@ import (
 
 	"github.com/brianvoe/gofakeit/v7"
 	"github.com/google/uuid"
+	"github.com/kubeflow/hub/pkg/openapi"
 	"github.com/kubeflow/hub/ui/bff/internal/constants"
 	"github.com/kubeflow/hub/ui/bff/internal/models"
-	"github.com/kubeflow/model-registry/pkg/openapi"
 )
 
 func GetRegisteredModelMocks() []openapi.RegisteredModel {
@@ -184,8 +184,8 @@ func GetModelArtifactListMock() openapi.ModelArtifactList {
 	}
 }
 
-func newCustomProperties() *map[string]openapi.MetadataValue {
-	result := map[string]openapi.MetadataValue{
+func newCustomProperties() map[string]openapi.MetadataValue {
+	return map[string]openapi.MetadataValue{
 		"tensorflow": {
 			MetadataStringValue: &openapi.MetadataStringValue{
 				StringValue:  "",
@@ -223,8 +223,6 @@ func newCustomProperties() *map[string]openapi.MetadataValue {
 			},
 		},
 	}
-
-	return &result
 }
 
 func catalogCustomProperties() *map[string]openapi.MetadataValue {
@@ -265,7 +263,7 @@ func catalogCustomPropertiesWithVariant(variantGroupId string, tensorType string
 		},
 		"validated_on": {
 			MetadataStringValue: &openapi.MetadataStringValue{
-				StringValue:  "[\"RHOAI 2.20\",\"RHAIIS 3.0\",\"RHELAI 1.5\"]",
+				StringValue:  "[\"RHOAI 2.20\",\"RHAIIS 3.0\",\"RHELAI 1.5\",\"vllm 0.20.0 - CUDA\"]",
 				MetadataType: "MetadataStringValue",
 			},
 		},
@@ -296,6 +294,12 @@ func catalogCustomPropertiesWithVariant(variantGroupId string, tensorType string
 		"model_type": {
 			MetadataStringValue: &openapi.MetadataStringValue{
 				StringValue:  "generative",
+				MetadataType: "MetadataStringValue",
+			},
+		},
+		"hardware_tag": {
+			MetadataStringValue: &openapi.MetadataStringValue{
+				StringValue:  "GPU",
 				MetadataType: "MetadataStringValue",
 			},
 		},
@@ -354,23 +358,47 @@ func GenerateMockArtifact() openapi.Artifact {
 	return mockData
 }
 
+func withModelSizeData(props *map[string]openapi.MetadataValue, modelSize string, minVram string) *map[string]openapi.MetadataValue {
+	if props == nil {
+		return props
+	}
+	(*props)["model_size"] = openapi.MetadataValue{
+		MetadataStringValue: &openapi.MetadataStringValue{
+			StringValue:  modelSize,
+			MetadataType: "MetadataStringValue",
+		},
+	}
+	(*props)["min_vram_gb"] = openapi.MetadataValue{
+		MetadataStringValue: &openapi.MetadataStringValue{
+			StringValue:  minVram,
+			MetadataType: "MetadataStringValue",
+		},
+	}
+	return props
+}
+
 const graniteVariantGroupId = "b6c850a4-aa4c-4a0f-91b1-0a69f4352843"
 
 func GetCatalogModelMocks() []models.CatalogModel {
 	sampleModel1 := models.CatalogModel{
-		Name:             "repo1/granite-8b-code-instruct",
-		Description:      stringToPointer("Granite-8B-Code-Instruct is a 8B parameter model fine tuned from\nGranite-8B-Code-Base on a combination of permissively licensed instruction\ndata to enhance instruction following capabilities including logical\nreasoning and problem-solving skills."),
-		Provider:         stringToPointer("provider1"),
-		Tasks:            []string{"text-generation", "image-to-text", "tool-calling"},
-		ValidatedTasks:   []string{"tool-calling"},
-		License:          stringToPointer("Apache 2.0"),
-		LicenseLink:      stringToPointer("https://www.apache.org/licenses/LICENSE-2.0.txt"),
-		Maturity:         stringToPointer("Technology preview"),
-		Language:         []string{"ar", "cs", "de", "en", "es", "fr", "it", "ja", "ko", "nl", "pt", "zh"},
-		CustomProperties: catalogCustomPropertiesWithVariant(graniteVariantGroupId, "FP16"),
+		Name:           "repo1/granite-8b-code-instruct",
+		Description:    stringToPointer("Granite-8B-Code-Instruct is a 8B parameter model fine tuned from\nGranite-8B-Code-Base on a combination of permissively licensed instruction\ndata to enhance instruction following capabilities including logical\nreasoning and problem-solving skills."),
+		Provider:       stringToPointer("provider1"),
+		Tasks:          []string{"text-generation", "image-to-text", "tool-calling"},
+		ValidatedTasks: []string{"tool-calling"},
+		License:        stringToPointer("Apache 2.0"),
+		LicenseLink:    stringToPointer("https://www.apache.org/licenses/LICENSE-2.0.txt"),
+		Maturity:       stringToPointer("Technology preview"),
+		Language:       []string{"ar", "cs", "de", "en", "es", "fr", "it", "ja", "ko", "nl", "pt", "zh"},
+		CustomProperties: withModelSizeData(
+			catalogCustomPropertiesWithVariant(graniteVariantGroupId, "FP16"),
+			"8B", "24GB",
+		),
 		ServingConfig: &models.ServingConfig{
 			ToolCalling: &models.ToolCallingConfig{
-				Args: stringToPointer("--enable-auto-tool-choice \\\n--tool-call-parser granite \\\n--chat-template\nopt/app-root/template/tool_chat_template_granite.jinja"),
+				ToolCallParser:       stringToPointer("granite"),
+				ChatTemplate:         stringToPointer("opt/app-root/template/tool_chat_template_granite.jinja"),
+				EnableAutoToolChoice: boolToPointer(true),
 			},
 		},
 		Logo: stringToPointer("data:image/svg+xml;base64,PHN2ZyBpZD0iTGF5ZXJfMSIgZGF0YS1uYW1lPSJMYXllciAxIiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxOTIgMTQ1Ij48ZGVmcz48c3R5bGU+LmNscy0xe2ZpbGw6I2UwMDt9PC9zdHlsZT48L2RlZnM+PHRpdGxlPlJlZEhhdC1Mb2dvLUhhdC1Db2xvcjwvdGl0bGU+PHBhdGggZD0iTTE1Ny43Nyw2Mi42MWExNCwxNCwwLDAsMSwuMzEsMy40MmMwLDE0Ljg4LTE4LjEsMTcuNDYtMzAuNjEsMTcuNDZDNzguODMsODMuNDksNDIuNTMsNTMuMjYsNDIuNTMsNDRhNi40Myw2LjQzLDAsMCwxLC4yMi0xLjk0bC0zLjY2LDkuMDZhMTguNDUsMTguNDUsMCwwLDAtMS41MSw3LjMzYzAsMTguMTEsNDEsNDUuNDgsODcuNzQsNDUuNDgsMjAuNjksMCwzNi40My03Ljc2LDM2LjQzLTIxLjc3LDAtMS4wOCwwLTEuOTQtMS43My0xMC4xM1oiLz48cGF0aCBjbGFzcz0iY2xzLTEiIGQ9Ik0xMjcuNDcsODMuNDljMTIuNTEsMCwzMC42MS0yLjU4LDMwLjYxLTE3LjQ2YTE0LDE0LDAsMCwwLS4zMS0zLjQybC03LjQ1LTMyLjM2Yy0xLjcyLTcuMTItMy4yMy0xMC4zNS0xNS43My0xNi42QzEyNC44OSw4LjY5LDEwMy43Ni41LDk3LjUxLjUsOTEuNjkuNSw5MCw4LDgzLjA2LDhjLTYuNjgsMC0xMS42NC01LjYtMTcuODktNS42LTYsMC05LjkxLDQuMDktMTIuOTMsMTIuNSwwLDAtOC40MSwyMy43Mi05LjQ5LDI3LjE2QTYuNDMsNi40MywwLDAsMCw0Mi41Myw0NGMwLDkuMjIsMzYuMywzOS40NSw4NC45NCwzOS40NU0xNjAsNzIuMDdjMS43Myw4LjE5LDEuNzMsOS4wNSwxLjczLDEwLjEzLDAsMTQtMTUuNzQsMjEuNzctMzYuNDMsMjEuNzdDNzguNTQsMTA0LDM3LjU4LDc2LjYsMzcuNTgsNTguNDlhMTguNDUsMTguNDUsMCwwLDEsMS41MS03LjMzQzIyLjI3LDUyLC41LDU1LC41LDc0LjIyYzAsMzEuNDgsNzQuNTksNzAuMjgsMTMzLjY1LDcwLjI4LDQ1LjI4LDAsNTYuNy0yMC40OCw1Ni43LTM2LjY1LDAtMTIuNzItMTEtMjcuMTYtMzAuODMtMzUuNzgiLz48L3N2Zz4="),
@@ -718,42 +746,51 @@ Granite 3.1 Instruct Models are primarily finetuned using instruction-response p
 	}
 
 	sampleModel2 := models.CatalogModel{
-		Name:             "repo1/granite-8b-code-instruct-quantized.w4a16",
-		Description:      stringToPointer("Granite 8B Code Instruct - INT4 quantized variant for efficient inference"),
-		Provider:         stringToPointer("Provider one"),
-		Tasks:            []string{"text-generation", "image-text-to-text"},
-		License:          stringToPointer("Apache 2.0"),
-		Maturity:         stringToPointer("Generally Available"),
-		Language:         []string{"en"},
-		SourceId:         stringToPointer("sample-source"),
-		CustomProperties: catalogCustomPropertiesWithVariant(graniteVariantGroupId, "INT4"),
-		Logo:             stringToPointer("data:image/svg+xml;base64,PHN2ZyBpZD0iTGF5ZXJfMSIgZGF0YS1uYW1lPSJMYXllciAxIiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxOTIgMTQ1Ij48ZGVmcz48c3R5bGU+LmNscy0xe2ZpbGw6I2UwMDt9PC9zdHlsZT48L2RlZnM+PHRpdGxlPlJlZEhhdC1Mb2dvLUhhdC1Db2xvcjwvdGl0bGU+PHBhdGggZD0iTTE1Ny43Nyw2Mi42MWExNCwxNCwwLDAsMSwuMzEsMy40MmMwLDE0Ljg4LTE4LjEsMTcuNDYtMzAuNjEsMTcuNDZDNzguODMsODMuNDksNDIuNTMsNTMuMjYsNDIuNTMsNDRhNi40Myw2LjQzLDAsMCwxLC4yMi0xLjk0bC0zLjY2LDkuMDZhMTguNDUsMTguNDUsMCwwLDAtMS41MSw3LjMzYzAsMTguMTEsNDEsNDUuNDgsODcuNzQsNDUuNDgsMjAuNjksMCwzNi40My03Ljc2LDM2LjQzLTIxLjc3LDAtMS4wOCwwLTEuOTQtMS43My0xMC4xM1oiLz48cGF0aCBjbGFzcz0iY2xzLTEiIGQ9Ik0xMjcuNDcsODMuNDljMTIuNTEsMCwzMC42MS0yLjU4LDMwLjYxLTE3LjQ2YTE0LDE0LDAsMCwwLS4zMS0zLjQybC03LjQ1LTMyLjM2Yy0xLjcyLTcuMTItMy4yMy0xMC4zNS0xNS43My0xNi42QzEyNC44OSw4LjY5LDEwMy43Ni41LDk3LjUxLjUsOTEuNjkuNSw5MCw4LDgzLjA2LDhjLTYuNjgsMC0xMS42NC01LjYtMTcuODktNS42LTYsMC05LjkxLDQuMDktMTIuOTMsMTIuNSwwLDAtOC40MSwyMy43Mi05LjQ5LDI3LjE2QTYuNDMsNi40MywwLDAsMCw0Mi41Myw0NGMwLDkuMjIsMzYuMywzOS40NSw4NC45NCwzOS40NU0xNjAsNzIuMDdjMS43Myw4LjE5LDEuNzMsOS4wNSwxLjczLDEwLjEzLDAsMTQtMTUuNzQsMjEuNzctMzYuNDMsMjEuNzdDNzguNTQsMTA0LDM3LjU4LDc2LjYsMzcuNTgsNTguNDlhMTguNDUsMTguNDUsMCwwLDEsMS41MS03LjMzQzIyLjI3LDUyLC41LDU1LC41LDc0LjIyYzAsMzEuNDgsNzQuNTksNzAuMjgsMTMzLjY1LDcwLjI4LDQ1LjI4LDAsNTYuNy0yMC40OCw1Ni43LTM2LjY1LDAtMTIuNzItMTEtMjcuMTYtMzAuODMtMzUuNzgiLz48L3N2Zz4="),
+		Name:        "repo1/granite-8b-code-instruct-quantized.w4a16",
+		Description: stringToPointer("Granite 8B Code Instruct - INT4 quantized variant for efficient inference"),
+		Provider:    stringToPointer("Provider one"),
+		Tasks:       []string{"text-generation", "image-text-to-text"},
+		License:     stringToPointer("Apache 2.0"),
+		Maturity:    stringToPointer("Generally Available"),
+		Language:    []string{"en"},
+		SourceId:    stringToPointer("sample-source"),
+		CustomProperties: withModelSizeData(
+			catalogCustomPropertiesWithVariant(graniteVariantGroupId, "INT4"),
+			"8B", "12GB",
+		),
+		Logo: stringToPointer("data:image/svg+xml;base64,PHN2ZyBpZD0iTGF5ZXJfMSIgZGF0YS1uYW1lPSJMYXllciAxIiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxOTIgMTQ1Ij48ZGVmcz48c3R5bGU+LmNscy0xe2ZpbGw6I2UwMDt9PC9zdHlsZT48L2RlZnM+PHRpdGxlPlJlZEhhdC1Mb2dvLUhhdC1Db2xvcjwvdGl0bGU+PHBhdGggZD0iTTE1Ny43Nyw2Mi42MWExNCwxNCwwLDAsMSwuMzEsMy40MmMwLDE0Ljg4LTE4LjEsMTcuNDYtMzAuNjEsMTcuNDZDNzguODMsODMuNDksNDIuNTMsNTMuMjYsNDIuNTMsNDRhNi40Myw2LjQzLDAsMCwxLC4yMi0xLjk0bC0zLjY2LDkuMDZhMTguNDUsMTguNDUsMCwwLDAtMS41MSw3LjMzYzAsMTguMTEsNDEsNDUuNDgsODcuNzQsNDUuNDgsMjAuNjksMCwzNi40My03Ljc2LDM2LjQzLTIxLjc3LDAtMS4wOCwwLTEuOTQtMS43My0xMC4xM1oiLz48cGF0aCBjbGFzcz0iY2xzLTEiIGQ9Ik0xMjcuNDcsODMuNDljMTIuNTEsMCwzMC42MS0yLjU4LDMwLjYxLTE3LjQ2YTE0LDE0LDAsMCwwLS4zMS0zLjQybC03LjQ1LTMyLjM2Yy0xLjcyLTcuMTItMy4yMy0xMC4zNS0xNS43My0xNi42QzEyNC44OSw4LjY5LDEwMy43Ni41LDk3LjUxLjUsOTEuNjkuNSw5MCw4LDgzLjA2LDhjLTYuNjgsMC0xMS42NC01LjYtMTcuODktNS42LTYsMC05LjkxLDQuMDktMTIuOTMsMTIuNSwwLDAtOC40MSwyMy43Mi05LjQ5LDI3LjE2QTYuNDMsNi40MywwLDAsMCw0Mi41Myw0NGMwLDkuMjIsMzYuMywzOS40NSw4NC45NCwzOS40NU0xNjAsNzIuMDdjMS43Myw4LjE5LDEuNzMsOS4wNSwxLjczLDEwLjEzLDAsMTQtMTUuNzQsMjEuNzctMzYuNDMsMjEuNzdDNzguNTQsMTA0LDM3LjU4LDc2LjYsMzcuNTgsNTguNDlhMTguNDUsMTguNDUsMCwwLDEsMS41MS03LjMzQzIyLjI3LDUyLC41LDU1LC41LDc0LjIyYzAsMzEuNDgsNzQuNTksNzAuMjgsMTMzLjY1LDcwLjI4LDQ1LjI4LDAsNTYuNy0yMC40OCw1Ni43LTM2LjY1LDAtMTIuNzItMTEtMjcuMTYtMzAuODMtMzUuNzgiLz48L3N2Zz4="),
 	}
 
 	sampleModel3 := models.CatalogModel{
-		Name:             "repo1/granite-8b-code-instruct-quantized.w8a8",
-		Description:      stringToPointer("Granite 8B Code Instruct - INT8 quantized variant for balanced performance"),
-		Provider:         stringToPointer("IBM"),
-		Tasks:            []string{"audio-to-text", "text-to-text", "video-to-text"},
-		License:          stringToPointer("MIT"),
-		Maturity:         stringToPointer("Generally Available"),
-		Language:         []string{"en"},
-		SourceId:         stringToPointer("sample-source"),
-		CustomProperties: catalogCustomPropertiesWithVariant(graniteVariantGroupId, "INT8"),
-		Logo:             stringToPointer("data:image/svg+xml;base64,PHN2ZyBpZD0iTGF5ZXJfMSIgZGF0YS1uYW1lPSJMYXllciAxIiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxOTIgMTQ1Ij48ZGVmcz48c3R5bGU+LmNscy0xe2ZpbGw6I2UwMDt9PC9zdHlsZT48L2RlZnM+PHRpdGxlPlJlZEhhdC1Mb2dvLUhhdC1Db2xvcjwvdGl0bGU+PHBhdGggZD0iTTE1Ny43Nyw2Mi42MWExNCwxNCwwLDAsMSwuMzEsMy40MmMwLDE0Ljg4LTE4LjEsMTcuNDYtMzAuNjEsMTcuNDZDNzguODMsODMuNDksNDIuNTMsNTMuMjYsNDIuNTMsNDRhNi40Myw2LjQzLDAsMCwxLC4yMi0xLjk0bC0zLjY2LDkuMDZhMTguNDUsMTguNDUsMCwwLDAtMS41MSw3LjMzYzAsMTguMTEsNDEsNDUuNDgsODcuNzQsNDUuNDgsMjAuNjksMCwzNi40My03Ljc2LDM2LjQzLTIxLjc3LDAtMS4wOCwwLTEuOTQtMS43My0xMC4xM1oiLz48cGF0aCBjbGFzcz0iY2xzLTEiIGQ9Ik0xMjcuNDcsODMuNDljMTIuNTEsMCwzMC42MS0yLjU4LDMwLjYxLTE3LjQ2YTE0LDE0LDAsMCwwLS4zMS0zLjQybC03LjQ1LTMyLjM2Yy0xLjcyLTcuMTItMy4yMy0xMC4zNS0xNS43My0xNi42QzEyNC44OSw4LjY5LDEwMy43Ni41LDk3LjUxLjUsOTEuNjkuNSw5MCw4LDgzLjA2LDhjLTYuNjgsMC0xMS42NC01LjYtMTcuODktNS42LTYsMC05LjkxLDQuMDktMTIuOTMsMTIuNSwwLDAtOC40MSwyMy43Mi05LjQ5LDI3LjE2QTYuNDMsNi40MywwLDAsMCw0Mi41Myw0NGMwLDkuMjIsMzYuMywzOS40NSw4NC45NCwzOS40NU0xNjAsNzIuMDdjMS43Myw4LjE5LDEuNzMsOS4wNSwxLjczLDEwLjEzLDAsMTQtMTUuNzQsMjEuNzctMzYuNDMsMjEuNzdDNzguNTQsMTA0LDM3LjU4LDc2LjYsMzcuNTgsNTguNDlhMTguNDUsMTguNDUsMCwwLDEsMS41MS03LjMzQzIyLjI3LDUyLC41LDU1LC41LDc0LjIyYzAsMzEuNDgsNzQuNTksNzAuMjgsMTMzLjY1LDcwLjI4LDQ1LjI4LDAsNTYuNy0yMC40OCw1Ni43LTM2LjY1LDAtMTIuNzItMTEtMjcuMTYtMzAuODMtMzUuNzgiLz48L3N2Zz4="),
+		Name:        "repo1/granite-8b-code-instruct-quantized.w8a8",
+		Description: stringToPointer("Granite 8B Code Instruct - INT8 quantized variant for balanced performance"),
+		Provider:    stringToPointer("IBM"),
+		Tasks:       []string{"audio-to-text", "text-to-text", "video-to-text"},
+		License:     stringToPointer("MIT"),
+		Maturity:    stringToPointer("Generally Available"),
+		Language:    []string{"en"},
+		SourceId:    stringToPointer("sample-source"),
+		CustomProperties: withModelSizeData(
+			catalogCustomPropertiesWithVariant(graniteVariantGroupId, "INT8"),
+			"8B", "16GB",
+		),
+		Logo: stringToPointer("data:image/svg+xml;base64,PHN2ZyBpZD0iTGF5ZXJfMSIgZGF0YS1uYW1lPSJMYXllciAxIiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxOTIgMTQ1Ij48ZGVmcz48c3R5bGU+LmNscy0xe2ZpbGw6I2UwMDt9PC9zdHlsZT48L2RlZnM+PHRpdGxlPlJlZEhhdC1Mb2dvLUhhdC1Db2xvcjwvdGl0bGU+PHBhdGggZD0iTTE1Ny43Nyw2Mi42MWExNCwxNCwwLDAsMSwuMzEsMy40MmMwLDE0Ljg4LTE4LjEsMTcuNDYtMzAuNjEsMTcuNDZDNzguODMsODMuNDksNDIuNTMsNTMuMjYsNDIuNTMsNDRhNi40Myw2LjQzLDAsMCwxLC4yMi0xLjk0bC0zLjY2LDkuMDZhMTguNDUsMTguNDUsMCwwLDAtMS41MSw3LjMzYzAsMTguMTEsNDEsNDUuNDgsODcuNzQsNDUuNDgsMjAuNjksMCwzNi40My03Ljc2LDM2LjQzLTIxLjc3LDAtMS4wOCwwLTEuOTQtMS43My0xMC4xM1oiLz48cGF0aCBjbGFzcz0iY2xzLTEiIGQ9Ik0xMjcuNDcsODMuNDljMTIuNTEsMCwzMC42MS0yLjU4LDMwLjYxLTE3LjQ2YTE0LDE0LDAsMCwwLS4zMS0zLjQybC03LjQ1LTMyLjM2Yy0xLjcyLTcuMTItMy4yMy0xMC4zNS0xNS43My0xNi42QzEyNC44OSw4LjY5LDEwMy43Ni41LDk3LjUxLjUsOTEuNjkuNSw5MCw4LDgzLjA2LDhjLTYuNjgsMC0xMS42NC01LjYtMTcuODktNS42LTYsMC05LjkxLDQuMDktMTIuOTMsMTIuNSwwLDAtOC40MSwyMy43Mi05LjQ5LDI3LjE2QTYuNDMsNi40MywwLDAsMCw0Mi41Myw0NGMwLDkuMjIsMzYuMywzOS40NSw4NC45NCwzOS40NU0xNjAsNzIuMDdjMS43Myw4LjE5LDEuNzMsOS4wNSwxLjczLDEwLjEzLDAsMTQtMTUuNzQsMjEuNzctMzYuNDMsMjEuNzdDNzguNTQsMTA0LDM3LjU4LDc2LjYsMzcuNTgsNTguNDlhMTguNDUsMTguNDUsMCwwLDEsMS41MS03LjMzQzIyLjI3LDUyLC41LDU1LC41LDc0LjIyYzAsMzEuNDgsNzQuNTksNzAuMjgsMTMzLjY1LDcwLjI4LDQ1LjI4LDAsNTYuNy0yMC40OCw1Ni43LTM2LjY1LDAtMTIuNzItMTEtMjcuMTYtMzAuODMtMzUuNzgiLz48L3N2Zz4="),
 	}
 
 	sampleModel4 := models.CatalogModel{
-		Name:             "repo1/granite-8b-code-instruct-bf16",
-		Description:      stringToPointer("Granite 8B Code Instruct - BF16 variant for high precision"),
-		Provider:         stringToPointer("IBM"),
-		Tasks:            []string{"text-generation", "code-generation"},
-		License:          stringToPointer("Apache 2.0"),
-		Maturity:         stringToPointer("Generally Available"),
-		Language:         []string{"en"},
-		SourceId:         stringToPointer("sample-source"),
-		CustomProperties: catalogCustomPropertiesWithVariant(graniteVariantGroupId, "BF16"),
-		Logo:             stringToPointer("data:image/svg+xml;base64,PHN2ZyBpZD0iTGF5ZXJfMSIgZGF0YS1uYW1lPSJMYXllciAxIiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxOTIgMTQ1Ij48ZGVmcz48c3R5bGU+LmNscy0xe2ZpbGw6I2UwMDt9PC9zdHlsZT48L2RlZnM+PHRpdGxlPlJlZEhhdC1Mb2dvLUhhdC1Db2xvcjwvdGl0bGU+PHBhdGggZD0iTTE1Ny43Nyw2Mi42MWExNCwxNCwwLDAsMSwuMzEsMy40MmMwLDE0Ljg4LTE4LjEsMTcuNDYtMzAuNjEsMTcuNDZDNzguODMsODMuNDksNDIuNTMsNTMuMjYsNDIuNTMsNDRhNi40Myw2LjQzLDAsMCwxLC4yMi0xLjk0bC0zLjY2LDkuMDZhMTguNDUsMTguNDUsMCwwLDAtMS41MSw3LjMzYzAsMTguMTEsNDEsNDUuNDgsODcuNzQsNDUuNDgsMjAuNjksMCwzNi40My03Ljc2LDM2LjQzLTIxLjc3LDAtMS4wOCwwLTEuOTQtMS43My0xMC4xM1oiLz48cGF0aCBjbGFzcz0iY2xzLTEiIGQ9Ik0xMjcuNDcsODMuNDljMTIuNTEsMCwzMC42MS0yLjU4LDMwLjYxLTE3LjQ2YTE0LDE0LDAsMCwwLS4zMS0zLjQybC03LjQ1LTMyLjM2Yy0xLjcyLTcuMTItMy4yMy0xMC4zNS0xNS43My0xNi42QzEyNC44OSw4LjY5LDEwMy43Ni41LDk3LjUxLjUsOTEuNjkuNSw5MCw4LDgzLjA2LDhjLTYuNjgsMC0xMS42NC01LjYtMTcuODktNS42LTYsMC05LjkxLDQuMDktMTIuOTMsMTIuNSwwLDAtOC40MSwyMy43Mi05LjQ5LDI3LjE2QTYuNDMsNi40MywwLDAsMCw0Mi41Myw0NGMwLDkuMjIsMzYuMywzOS40NSw4NC45NCwzOS40NU0xNjAsNzIuMDdjMS43Myw4LjE5LDEuNzMsOS4wNSwxLjczLDEwLjEzLDAsMTQtMTUuNzQsMjEuNzctMzYuNDMsMjEuNzdDNzguNTQsMTA0LDM3LjU4LDc2LjYsMzcuNTgsNTguNDlhMTguNDUsMTguNDUsMCwwLDEsMS41MS03LjMzQzIyLjI3LDUyLC41LDU1LC41LDc0LjIyYzAsMzEuNDgsNzQuNTksNzAuMjgsMTMzLjY1LDcwLjI4LDQ1LjI4LDAsNTYuNy0yMC40OCw1Ni43LTM2LjY1LDAtMTIuNzItMTEtMjcuMTYtMzAuODMtMzUuNzgiLz48L3N2Zz4="),
+		Name:        "repo1/granite-8b-code-instruct-bf16",
+		Description: stringToPointer("Granite 8B Code Instruct - BF16 variant for high precision"),
+		Provider:    stringToPointer("IBM"),
+		Tasks:       []string{"text-generation", "code-generation"},
+		License:     stringToPointer("Apache 2.0"),
+		Maturity:    stringToPointer("Generally Available"),
+		Language:    []string{"en"},
+		SourceId:    stringToPointer("sample-source"),
+		CustomProperties: withModelSizeData(
+			catalogCustomPropertiesWithVariant(graniteVariantGroupId, "BF16"),
+			"8B", "24GB",
+		),
+		Logo: stringToPointer("data:image/svg+xml;base64,PHN2ZyBpZD0iTGF5ZXJfMSIgZGF0YS1uYW1lPSJMYXllciAxIiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxOTIgMTQ1Ij48ZGVmcz48c3R5bGU+LmNscy0xe2ZpbGw6I2UwMDt9PC9zdHlsZT48L2RlZnM+PHRpdGxlPlJlZEhhdC1Mb2dvLUhhdC1Db2xvcjwvdGl0bGU+PHBhdGggZD0iTTE1Ny43Nyw2Mi42MWExNCwxNCwwLDAsMSwuMzEsMy40MmMwLDE0Ljg4LTE4LjEsMTcuNDYtMzAuNjEsMTcuNDZDNzguODMsODMuNDksNDIuNTMsNTMuMjYsNDIuNTMsNDRhNi40Myw2LjQzLDAsMCwxLC4yMi0xLjk0bC0zLjY2LDkuMDZhMTguNDUsMTguNDUsMCwwLDAtMS41MSw3LjMzYzAsMTguMTEsNDEsNDUuNDgsODcuNzQsNDUuNDgsMjAuNjksMCwzNi40My03Ljc2LDM2LjQzLTIxLjc3LDAtMS4wOCwwLTEuOTQtMS43My0xMC4xM1oiLz48cGF0aCBjbGFzcz0iY2xzLTEiIGQ9Ik0xMjcuNDcsODMuNDljMTIuNTEsMCwzMC42MS0yLjU4LDMwLjYxLTE3LjQ2YTE0LDE0LDAsMCwwLS4zMS0zLjQybC03LjQ1LTMyLjM2Yy0xLjcyLTcuMTItMy4yMy0xMC4zNS0xNS43My0xNi42QzEyNC44OSw4LjY5LDEwMy43Ni41LDk3LjUxLjUsOTEuNjkuNSw5MCw4LDgzLjA2LDhjLTYuNjgsMC0xMS42NC01LjYtMTcuODktNS42LTYsMC05LjkxLDQuMDktMTIuOTMsMTIuNSwwLDAtOC40MSwyMy43Mi05LjQ5LDI3LjE2QTYuNDMsNi40MywwLDAsMCw0Mi41Myw0NGMwLDkuMjIsMzYuMywzOS40NSw4NC45NCwzOS40NU0xNjAsNzIuMDdjMS43Myw4LjE5LDEuNzMsOS4wNSwxLjczLDEwLjEzLDAsMTQtMTUuNzQsMjEuNzctMzYuNDMsMjEuNzdDNzguNTQsMTA0LDM3LjU4LDc2LjYsMzcuNTgsNTguNDlhMTguNDUsMTguNDUsMCwwLDEsMS41MS03LjMzQzIyLjI3LDUyLC41LDU1LC41LDc0LjIyYzAsMzEuNDgsNzQuNTksNzAuMjgsMTMzLjY1LDcwLjI4LDQ1LjI4LDAsNTYuNy0yMC40OCw1Ni43LTM2LjY1LDAtMTIuNzItMTEtMjcuMTYtMzAuODMtMzUuNzgiLz48L3N2Zz4="),
 	}
 
 	huggingFaceModel1 := models.CatalogModel{
@@ -1053,7 +1090,7 @@ func GetCatalogLabelListMock() models.CatalogLabelList {
 func GetCatalogModelArtifactMock() []models.CatalogArtifact {
 	architecturesJSON, _ := json.Marshal([]string{"amd64", "arm64", "s390x", "ppc64le"})
 	customProps := newCustomProperties()
-	(*customProps)["architecture"] = openapi.MetadataValue{
+	customProps["architecture"] = openapi.MetadataValue{
 		MetadataStringValue: &openapi.MetadataStringValue{
 			StringValue:  string(architecturesJSON),
 			MetadataType: "MetadataStringValue",
@@ -1066,7 +1103,7 @@ func GetCatalogModelArtifactMock() []models.CatalogArtifact {
 			Uri:                      stringToPointer("oci://registry.sample.io/repo1/modelcar-granite-7b-starter:1.4.0"),
 			CreateTimeSinceEpoch:     stringToPointer("1693526400000"),
 			LastUpdateTimeSinceEpoch: stringToPointer("1704067200000"),
-			CustomProperties:         customProps,
+			CustomProperties:         &customProps,
 		},
 	}
 }
@@ -1636,7 +1673,82 @@ func GetCatalogPerformanceMetricsArtifactMock(itemCount int32) []models.CatalogA
 		},
 	}
 	artifacts = artifacts[:itemCount]
+
+	coldStartArtifacts := []models.CatalogArtifact{
+		{
+			ArtifactType:             *stringToPointer("metrics-artifact"),
+			MetricsType:              stringToPointer("performance-metrics"),
+			CreateTimeSinceEpoch:     stringToPointer("1693526400000"),
+			LastUpdateTimeSinceEpoch: stringToPointer("1704067200000"),
+			CustomProperties:         coldStartCustomProperties("coldstart-h100-2gpu", "H100", "2", 52.1, "vllm serve repo1/granite-8b-code-instruct --tensor-parallel-size 2 --dtype float16"),
+		},
+		{
+			ArtifactType:             *stringToPointer("metrics-artifact"),
+			MetricsType:              stringToPointer("performance-metrics"),
+			CreateTimeSinceEpoch:     stringToPointer("1693526400000"),
+			LastUpdateTimeSinceEpoch: stringToPointer("1704067200000"),
+			CustomProperties:         coldStartCustomProperties("coldstart-a100-8gpu", "A100", "8", 85.2, "vllm serve repo1/granite-8b-code-instruct --tensor-parallel-size 8 --dtype float16"),
+		},
+		{
+			ArtifactType:             *stringToPointer("metrics-artifact"),
+			MetricsType:              stringToPointer("performance-metrics"),
+			CreateTimeSinceEpoch:     stringToPointer("1693526400000"),
+			LastUpdateTimeSinceEpoch: stringToPointer("1704067200000"),
+			CustomProperties:         coldStartCustomProperties("coldstart-rtx4090-4gpu", "RTX 4090", "4", 110.8, "vllm serve repo1/granite-8b-code-instruct --tensor-parallel-size 4 --dtype auto"),
+		},
+		{
+			ArtifactType:             *stringToPointer("metrics-artifact"),
+			MetricsType:              stringToPointer("performance-metrics"),
+			CreateTimeSinceEpoch:     stringToPointer("1693526400000"),
+			LastUpdateTimeSinceEpoch: stringToPointer("1704067200000"),
+			CustomProperties:         coldStartCustomProperties("coldstart-a100-80-2gpu", "A100-80", "2", 73.6, "vllm serve repo1/granite-8b-code-instruct --tensor-parallel-size 2 --dtype auto"),
+		},
+	}
+	artifacts = append(artifacts, coldStartArtifacts...)
+
 	return artifacts
+}
+
+func coldStartCustomProperties(configID string, gpuType string, gpuCount string, coldStartSeconds float64, runtimeCommand string) *map[string]openapi.MetadataValue {
+	result := map[string]openapi.MetadataValue{
+		"config_id": {
+			MetadataStringValue: &openapi.MetadataStringValue{
+				StringValue:  configID,
+				MetadataType: "MetadataStringValue",
+			},
+		},
+		"performance_sub_type": {
+			MetadataStringValue: &openapi.MetadataStringValue{
+				StringValue:  "cold-start",
+				MetadataType: "MetadataStringValue",
+			},
+		},
+		"gpu_type": {
+			MetadataStringValue: &openapi.MetadataStringValue{
+				StringValue:  gpuType,
+				MetadataType: "MetadataStringValue",
+			},
+		},
+		"gpu_count": {
+			MetadataIntValue: &openapi.MetadataIntValue{
+				IntValue:     gpuCount,
+				MetadataType: "MetadataIntValue",
+			},
+		},
+		"cold_start_time_to_load_seconds": {
+			MetadataDoubleValue: &openapi.MetadataDoubleValue{
+				DoubleValue:  coldStartSeconds,
+				MetadataType: "MetadataDoubleValue",
+			},
+		},
+		"runtime_command": {
+			MetadataStringValue: &openapi.MetadataStringValue{
+				StringValue:  runtimeCommand,
+				MetadataType: "MetadataStringValue",
+			},
+		},
+	}
+	return &result
 }
 
 func accuracyMetricsCustomProperties() *map[string]openapi.MetadataValue {
@@ -1668,6 +1780,145 @@ func GetCatalogAccuracyMetricsArtifactMock() []models.CatalogArtifact {
 		},
 	}
 }
+
+func securityMetricsCustomProperties(id, benchmark, description, evaluation, providerID, resultMetric, modelID string, pass bool, result, threshold float64) *map[string]openapi.MetadataValue {
+	resultMap := map[string]openapi.MetadataValue{
+		"id": {
+			MetadataStringValue: &openapi.MetadataStringValue{
+				StringValue:  id,
+				MetadataType: "MetadataStringValue",
+			},
+		},
+		"benchmark": {
+			MetadataStringValue: &openapi.MetadataStringValue{
+				StringValue:  benchmark,
+				MetadataType: "MetadataStringValue",
+			},
+		},
+		"category": {
+			MetadataStringValue: &openapi.MetadataStringValue{
+				StringValue:  "security",
+				MetadataType: "MetadataStringValue",
+			},
+		},
+		"description": {
+			MetadataStringValue: &openapi.MetadataStringValue{
+				StringValue:  description,
+				MetadataType: "MetadataStringValue",
+			},
+		},
+		"evaluation": {
+			MetadataStringValue: &openapi.MetadataStringValue{
+				StringValue:  evaluation,
+				MetadataType: "MetadataStringValue",
+			},
+		},
+		"model_id": {
+			MetadataStringValue: &openapi.MetadataStringValue{
+				StringValue:  modelID,
+				MetadataType: "MetadataStringValue",
+			},
+		},
+		"provider_id": {
+			MetadataStringValue: &openapi.MetadataStringValue{
+				StringValue:  providerID,
+				MetadataType: "MetadataStringValue",
+			},
+		},
+		"result_metric": {
+			MetadataStringValue: &openapi.MetadataStringValue{
+				StringValue:  resultMetric,
+				MetadataType: "MetadataStringValue",
+			},
+		},
+		"pass": {
+			MetadataBoolValue: &openapi.MetadataBoolValue{
+				BoolValue:    pass,
+				MetadataType: "MetadataBoolValue",
+			},
+		},
+		"lower_is_better": {
+			MetadataBoolValue: &openapi.MetadataBoolValue{
+				BoolValue:    true,
+				MetadataType: "MetadataBoolValue",
+			},
+		},
+		"result": {
+			MetadataDoubleValue: &openapi.MetadataDoubleValue{
+				DoubleValue:  result,
+				MetadataType: "MetadataDoubleValue",
+			},
+		},
+		"threshold": {
+			MetadataDoubleValue: &openapi.MetadataDoubleValue{
+				DoubleValue:  threshold,
+				MetadataType: "MetadataDoubleValue",
+			},
+		},
+	}
+	return &resultMap
+}
+
+func GetCatalogSecurityMetricsArtifactMock() []models.CatalogArtifact {
+	return []models.CatalogArtifact{
+		{
+			ID:                       stringToPointer("259211"),
+			Name:                     stringToPointer("security-a1b2c3d4-1001-4000-a000-000000000001"),
+			ExternalID:               stringToPointer("a1b2c3d4-1001-4000-a000-000000000001"),
+			ArtifactType:             *stringToPointer("metrics-artifact"),
+			MetricsType:              stringToPointer("security-metrics"),
+			CreateTimeSinceEpoch:     stringToPointer("1693526400000"),
+			LastUpdateTimeSinceEpoch: stringToPointer("1704067200000"),
+			CustomProperties:         securityMetricsCustomProperties("a1b2c3d4-1001-4000-a000-000000000001", "intents", "Risk assessment with a context-aware custom intent typology and probes of increasing complexity. Runs as an AI Pipeline and requires a Data Science Pipelines setup.", "Context-aware vulnerability scan (Pipeline)", "garak-kfp", "attack_success_rate", "repo1/granite-8b-code-instruct", true, 0.12, 0.3),
+		},
+		{
+			ID:                       stringToPointer("259212"),
+			Name:                     stringToPointer("security-a1b2c3d4-1001-4000-a000-000000000002"),
+			ExternalID:               stringToPointer("a1b2c3d4-1001-4000-a000-000000000002"),
+			ArtifactType:             *stringToPointer("metrics-artifact"),
+			MetricsType:              stringToPointer("security-metrics"),
+			CreateTimeSinceEpoch:     stringToPointer("1693526400000"),
+			LastUpdateTimeSinceEpoch: stringToPointer("1704067200000"),
+			CustomProperties:         securityMetricsCustomProperties("a1b2c3d4-1001-4000-a000-000000000002", "intents", "Risk assessment with a context-aware custom intent typology and probes of increasing complexity. Standalone execution without pipeline dependencies.", "Context-aware vulnerability scan (Standalone)", "garak-standalone", "attack_success_rate", "repo1/granite-8b-code-instruct", false, 0.65, 0.3),
+		},
+		{
+			ID:                       stringToPointer("259213"),
+			Name:                     stringToPointer("security-a1b2c3d4-1001-4000-a000-000000000003"),
+			ExternalID:               stringToPointer("a1b2c3d4-1001-4000-a000-000000000003"),
+			ArtifactType:             *stringToPointer("metrics-artifact"),
+			MetricsType:              stringToPointer("security-metrics"),
+			CreateTimeSinceEpoch:     stringToPointer("1695200000000"),
+			LastUpdateTimeSinceEpoch: stringToPointer("1706000000000"),
+			CustomProperties:         securityMetricsCustomProperties("a1b2c3d4-1001-4000-a000-000000000003", "prompt-injection", "Evaluates model robustness against prompt injection attacks using adversarial input patterns.", "Prompt injection robustness test", "garak-standalone", "injection_success_rate", "repo1/granite-8b-code-instruct", true, 0.05, 0.1),
+		},
+		{
+			ID:                       stringToPointer("259214"),
+			Name:                     stringToPointer("security-a1b2c3d4-1001-4000-a000-000000000004"),
+			ExternalID:               stringToPointer("a1b2c3d4-1001-4000-a000-000000000004"),
+			ArtifactType:             *stringToPointer("metrics-artifact"),
+			MetricsType:              stringToPointer("security-metrics"),
+			CreateTimeSinceEpoch:     stringToPointer("1696300000000"),
+			LastUpdateTimeSinceEpoch: stringToPointer("1707100000000"),
+			CustomProperties:         securityMetricsCustomProperties("a1b2c3d4-1001-4000-a000-000000000004", "toxicity", "Scans model outputs for toxic, harmful, or offensive content across domain-specific scenarios.", "Domain-specific toxicity scan", "garak-kfp", "toxicity_rate", "repo1/granite-8b-code-instruct", true, 0.02, 0.05),
+		},
+		{
+			ID:                       stringToPointer("259215"),
+			Name:                     stringToPointer("security-a1b2c3d4-1001-4000-a000-000000000005"),
+			ExternalID:               stringToPointer("a1b2c3d4-1001-4000-a000-000000000005"),
+			ArtifactType:             *stringToPointer("metrics-artifact"),
+			MetricsType:              stringToPointer("security-metrics"),
+			CreateTimeSinceEpoch:     stringToPointer("1697400000000"),
+			LastUpdateTimeSinceEpoch: stringToPointer("1708200000000"),
+			CustomProperties:         securityMetricsCustomProperties("a1b2c3d4-1001-4000-a000-000000000005", "hallucination", "Detects factual hallucinations and unsupported claims in model responses. Runs as an AI Pipeline.", "Hallucination detection scan (Pipeline)", "garak-kfp", "hallucination_rate", "repo1/granite-8b-code-instruct", false, 0.42, 0.2),
+		},
+	}
+}
+
+func GetCatalogSecurityMetricsArtifactListMock() models.CatalogModelArtifactList {
+	allArtifactMock := GetCatalogSecurityMetricsArtifactMock()
+	return GetModelArtifactListMockWithItems(allArtifactMock, 10)
+}
+
 func GetModelArtifactListMockWithItems(items []models.CatalogArtifact, pageSize int32) models.CatalogModelArtifactList {
 	return models.CatalogModelArtifactList{
 		Items:         items,
@@ -1730,7 +1981,7 @@ func GetFilterOptionMocks() map[string]models.FilterOption {
 		},
 	}
 
-	filterOptions["validatedTasks"] = models.FilterOption{
+	filterOptions["validated_tasks"] = models.FilterOption{
 		Type: FilterOptionTypeString,
 		Values: []interface{}{
 			"tool-calling",
@@ -2013,6 +2264,31 @@ func GetFilterOptionMocks() map[string]models.FilterOption {
 		},
 	}
 
+	// Cold-start load time in seconds
+	filterOptions["artifacts.cold_start_time_to_load_seconds.double_value"] = models.FilterOption{
+		Type: FilterOptionTypeNumber,
+		Range: &models.FilterRange{
+			Min: float32Ptr(47.2),
+			Max: float32Ptr(145.7),
+		},
+	}
+
+	filterOptions["min_vram_gb.double_value"] = models.FilterOption{
+		Type: FilterOptionTypeNumber,
+		Range: &models.FilterRange{
+			Min: float32Ptr(8),
+			Max: float32Ptr(140),
+		},
+	}
+
+	filterOptions["modelcar_image_size.double_value"] = models.FilterOption{
+		Type: FilterOptionTypeNumber,
+		Range: &models.FilterRange{
+			Min: float32Ptr(4),
+			Max: float32Ptr(230),
+		},
+	}
+
 	filterOptions["artifacts.hardware_count.int_value"] = models.FilterOption{
 		Type: FilterOptionTypeNumber,
 		Range: &models.FilterRange{
@@ -2232,6 +2508,10 @@ func GetNamedQueriesMocks() map[string]map[string]models.FieldFilter {
 			Operator: "<=",
 			Value:    float64(892.6553726196289),
 		},
+		"artifacts.cold_start_time_to_load_seconds.double_value": {
+			Operator: "<=",
+			Value:    "max",
+		},
 		"artifacts.use_case.string_value": {
 			Operator: "=",
 			Value:    "chatbot",
@@ -2343,33 +2623,27 @@ func CreateCatalogSourcePreviewMock() models.CatalogSourcePreviewResult {
 	return CreateCatalogSourcePreviewMockWithFilter("all", 20, "")
 }
 
-func CreateCatalogSourcePreviewMockWithFilter(filterStatus string, pageSize int, nextPageToken string) models.CatalogSourcePreviewResult {
-	allModels := GetModelsWithInclusionStatusListMocks()
-	catalogSourcePreviewSummary := GetCatalogSourcePreviewSummaryMock()
-
-	// Filter based on filterStatus
-	var filteredModels []models.CatalogSourcePreviewModel
+func filterAndPaginatePreviewItems(allItems []models.CatalogSourcePreviewModel, summary models.CatalogSourcePreviewSummary, filterStatus string, pageSize int, nextPageToken string) models.CatalogSourcePreviewResult {
+	var filtered []models.CatalogSourcePreviewModel
 	switch filterStatus {
 	case "included":
-		for _, m := range allModels {
-			if m.Included {
-				filteredModels = append(filteredModels, m)
+		for _, item := range allItems {
+			if item.Included {
+				filtered = append(filtered, item)
 			}
 		}
 	case "excluded":
-		for _, m := range allModels {
-			if !m.Included {
-				filteredModels = append(filteredModels, m)
+		for _, item := range allItems {
+			if !item.Included {
+				filtered = append(filtered, item)
 			}
 		}
-	default: // "all" or empty
-		filteredModels = allModels
+	default:
+		filtered = allItems
 	}
 
-	// Handle pagination
 	startIndex := 0
 	if nextPageToken != "" {
-		// Parse token as start index (simple mock implementation)
 		_, _ = fmt.Sscanf(nextPageToken, "%d", &startIndex)
 	}
 
@@ -2378,25 +2652,60 @@ func CreateCatalogSourcePreviewMockWithFilter(filterStatus string, pageSize int,
 	}
 
 	endIndex := startIndex + pageSize
-	if endIndex > len(filteredModels) {
-		endIndex = len(filteredModels)
+	if endIndex > len(filtered) {
+		endIndex = len(filtered)
 	}
 
-	pagedModels := filteredModels[startIndex:endIndex]
+	paged := filtered[startIndex:endIndex]
 
-	// Generate next page token if there are more items
 	var newNextPageToken string
-	if endIndex < len(filteredModels) {
+	if endIndex < len(filtered) {
 		newNextPageToken = fmt.Sprintf("%d", endIndex)
 	}
 
 	return models.CatalogSourcePreviewResult{
-		Items:         pagedModels,
-		Summary:       catalogSourcePreviewSummary,
+		Items:         paged,
+		Summary:       summary,
 		NextPageToken: newNextPageToken,
 		PageSize:      int32(pageSize),
-		Size:          int32(len(pagedModels)),
+		Size:          int32(len(paged)),
 	}
+}
+
+func CreateCatalogSourcePreviewMockWithFilter(filterStatus string, pageSize int, nextPageToken string) models.CatalogSourcePreviewResult {
+	return filterAndPaginatePreviewItems(GetModelsWithInclusionStatusListMocks(), GetCatalogSourcePreviewSummaryMock(), filterStatus, pageSize, nextPageToken)
+}
+
+func GetMcpServersWithInclusionStatusListMocks() []models.CatalogSourcePreviewModel {
+	var allServers []models.CatalogSourcePreviewModel
+
+	for i := 1; i <= 12; i++ {
+		allServers = append(allServers, models.CatalogSourcePreviewModel{
+			Name:     fmt.Sprintf("mcp-source/included-server-%d", i),
+			Included: true,
+		})
+	}
+
+	for i := 1; i <= 5; i++ {
+		allServers = append(allServers, models.CatalogSourcePreviewModel{
+			Name:     fmt.Sprintf("mcp-source/excluded-server-%d", i),
+			Included: false,
+		})
+	}
+
+	return allServers
+}
+
+func GetMcpCatalogSourcePreviewSummaryMock() models.CatalogSourcePreviewSummary {
+	return models.CatalogSourcePreviewSummary{
+		TotalAssets:    17,
+		IncludedAssets: 12,
+		ExcludedAssets: 5,
+	}
+}
+
+func CreateMcpCatalogSourcePreviewMockWithFilter(filterStatus string, pageSize int, nextPageToken string) models.CatalogSourcePreviewResult {
+	return filterAndPaginatePreviewItems(GetMcpServersWithInclusionStatusListMocks(), GetMcpCatalogSourcePreviewSummaryMock(), filterStatus, pageSize, nextPageToken)
 }
 
 func GetMcpServerMocks() []models.McpServer {
@@ -2406,6 +2715,7 @@ func GetMcpServerMocks() []models.McpServer {
 	prometheusMcp := models.McpServer{
 		ID:          "1",
 		Name:        "Prometheus MCP Server",
+		DisplayName: stringToPointer("Prometheus Monitoring"),
 		SourceID:    stringToPointer("community-mcp-source"),
 		Description: stringToPointer("Query Prometheus metrics and alerts directly from your agent"),
 		Provider:    stringToPointer("Prometheus Community"),
@@ -2489,6 +2799,7 @@ func GetMcpServerMocks() []models.McpServer {
 	elasticMcp := models.McpServer{
 		ID:          "3",
 		Name:        "Elasticsearch MCP Server",
+		DisplayName: stringToPointer("Elastic Search"),
 		SourceID:    stringToPointer("organization-mcp-source"),
 		Description: stringToPointer("Search and analyze data in Elasticsearch clusters"),
 		Provider:    stringToPointer("Elastic"),
@@ -2542,6 +2853,7 @@ func GetMcpServerMocks() []models.McpServer {
 	grafanaMcp := models.McpServer{
 		ID:          "5",
 		Name:        "Grafana MCP Server",
+		DisplayName: stringToPointer("Grafana"),
 		SourceID:    stringToPointer("community-mcp-source"),
 		Description: stringToPointer("Query Grafana dashboards, data sources and annotations via natural language"),
 		Provider:    stringToPointer("Grafana Labs"),
@@ -2612,6 +2924,7 @@ func GetMcpServerMocks() []models.McpServer {
 	redisMcp := models.McpServer{
 		ID:          "8",
 		Name:        "Redis MCP Server",
+		DisplayName: stringToPointer("Redis Cache Manager"),
 		SourceID:    stringToPointer("organization-mcp-source"),
 		Description: stringToPointer("Manage Redis key-value stores, caches and pub/sub channels"),
 		Provider:    stringToPointer("Redis Ltd"),

@@ -18,6 +18,116 @@ import (
 	model "github.com/kubeflow/hub/catalog/pkg/openapi"
 )
 
+// AssertAgentArtifactConstraints checks if the values respects the defined constraints
+func AssertAgentArtifactConstraints(obj model.AgentArtifact) error {
+	return nil
+}
+
+// AssertAgentArtifactRequired checks if the required fields are not zero-ed
+func AssertAgentArtifactRequired(obj model.AgentArtifact) error {
+	elements := map[string]interface{}{
+		"uri": obj.Uri,
+	}
+	for name, el := range elements {
+		if isZero := IsZeroValue(el); isZero {
+			return &RequiredError{Field: name}
+		}
+	}
+
+	return nil
+}
+
+// AssertAgentConstraints checks if the values respects the defined constraints
+func AssertAgentConstraints(obj model.Agent) error {
+	for _, el := range obj.Env {
+		if err := AssertAgentEnvVarConstraints(el); err != nil {
+			return err
+		}
+	}
+	for _, el := range obj.Artifacts {
+		if err := AssertAgentArtifactConstraints(el); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// AssertAgentEnvVarConstraints checks if the values respects the defined constraints
+func AssertAgentEnvVarConstraints(obj model.AgentEnvVar) error {
+	return nil
+}
+
+// AssertAgentEnvVarRequired checks if the required fields are not zero-ed
+func AssertAgentEnvVarRequired(obj model.AgentEnvVar) error {
+	elements := map[string]interface{}{
+		"name":     obj.Name,
+		"required": obj.Required,
+	}
+	for name, el := range elements {
+		if isZero := IsZeroValue(el); isZero {
+			return &RequiredError{Field: name}
+		}
+	}
+
+	return nil
+}
+
+// AssertAgentListConstraints checks if the values respects the defined constraints
+func AssertAgentListConstraints(obj model.AgentList) error {
+	for _, el := range obj.Items {
+		if err := AssertAgentConstraints(el); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// AssertAgentListRequired checks if the required fields are not zero-ed
+func AssertAgentListRequired(obj model.AgentList) error {
+	elements := map[string]interface{}{
+		"nextPageToken": obj.NextPageToken,
+		"pageSize":      obj.PageSize,
+		"size":          obj.Size,
+		"items":         obj.Items,
+	}
+	for name, el := range elements {
+		if isZero := IsZeroValue(el); isZero {
+			return &RequiredError{Field: name}
+		}
+	}
+
+	for _, el := range obj.Items {
+		if err := AssertAgentRequired(el); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// AssertAgentRequired checks if the required fields are not zero-ed
+func AssertAgentRequired(obj model.Agent) error {
+	elements := map[string]interface{}{
+		"name": obj.Name,
+	}
+	for name, el := range elements {
+		if isZero := IsZeroValue(el); isZero {
+			return &RequiredError{Field: name}
+		}
+	}
+
+	for _, el := range obj.Env {
+		if err := AssertAgentEnvVarRequired(el); err != nil {
+			return err
+		}
+	}
+	for _, el := range obj.Artifacts {
+		if err := AssertAgentArtifactRequired(el); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // AssertArtifactTypeQueryParamConstraints checks if the values respects the defined constraints
 func AssertArtifactTypeQueryParamConstraints(obj model.ArtifactTypeQueryParam) error {
 	return nil
@@ -25,6 +135,87 @@ func AssertArtifactTypeQueryParamConstraints(obj model.ArtifactTypeQueryParam) e
 
 // AssertArtifactTypeQueryParamRequired checks if the required fields are not zero-ed
 func AssertArtifactTypeQueryParamRequired(obj model.ArtifactTypeQueryParam) error {
+	return nil
+}
+
+// AssertAssetPreviewResultConstraints checks if the values respects the defined constraints
+func AssertAssetPreviewResultConstraints(obj model.AssetPreviewResult) error {
+	return nil
+}
+
+// AssertAssetPreviewResultRequired checks if the required fields are not zero-ed
+func AssertAssetPreviewResultRequired(obj model.AssetPreviewResult) error {
+	elements := map[string]interface{}{
+		"name":     obj.Name,
+		"included": obj.Included,
+	}
+	for name, el := range elements {
+		if isZero := IsZeroValue(el); isZero {
+			return &RequiredError{Field: name}
+		}
+	}
+
+	return nil
+}
+
+// AssertAssetSourcePreviewResponseAllOfSummaryConstraints checks if the values respects the defined constraints
+func AssertAssetSourcePreviewResponseAllOfSummaryConstraints(obj model.AssetSourcePreviewResponseAllOfSummary) error {
+	return nil
+}
+
+// AssertAssetSourcePreviewResponseAllOfSummaryRequired checks if the required fields are not zero-ed
+func AssertAssetSourcePreviewResponseAllOfSummaryRequired(obj model.AssetSourcePreviewResponseAllOfSummary) error {
+	elements := map[string]interface{}{
+		"totalAssets":    obj.TotalAssets,
+		"includedAssets": obj.IncludedAssets,
+		"excludedAssets": obj.ExcludedAssets,
+	}
+	for name, el := range elements {
+		if isZero := IsZeroValue(el); isZero {
+			return &RequiredError{Field: name}
+		}
+	}
+
+	return nil
+}
+
+// AssertAssetSourcePreviewResponseConstraints checks if the values respects the defined constraints
+func AssertAssetSourcePreviewResponseConstraints(obj model.AssetSourcePreviewResponse) error {
+	for _, el := range obj.Items {
+		if err := AssertAssetPreviewResultConstraints(el); err != nil {
+			return err
+		}
+	}
+	if err := AssertAssetSourcePreviewResponseAllOfSummaryConstraints(obj.Summary); err != nil {
+		return err
+	}
+	return nil
+}
+
+// AssertAssetSourcePreviewResponseRequired checks if the required fields are not zero-ed
+func AssertAssetSourcePreviewResponseRequired(obj model.AssetSourcePreviewResponse) error {
+	elements := map[string]interface{}{
+		"nextPageToken": obj.NextPageToken,
+		"pageSize":      obj.PageSize,
+		"size":          obj.Size,
+		"assetType":     obj.AssetType,
+		"items":         obj.Items,
+		"summary":       obj.Summary,
+	}
+	for name, el := range elements {
+		if isZero := IsZeroValue(el); isZero {
+			return &RequiredError{Field: name}
+		}
+	}
+
+	for _, el := range obj.Items {
+		if err := AssertAssetPreviewResultRequired(el); err != nil {
+			return err
+		}
+	}
+	if err := AssertAssetSourcePreviewResponseAllOfSummaryRequired(obj.Summary); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -340,6 +531,7 @@ func AssertCatalogSourcePreviewResponseRequired(obj model.CatalogSourcePreviewRe
 		"nextPageToken": obj.NextPageToken,
 		"pageSize":      obj.PageSize,
 		"size":          obj.Size,
+		"assetType":     obj.AssetType,
 		"items":         obj.Items,
 		"summary":       obj.Summary,
 	}

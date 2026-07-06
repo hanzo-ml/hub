@@ -12,7 +12,7 @@ import (
 	"github.com/kubeflow/hub/catalog/internal/catalog/basecatalog"
 	"github.com/kubeflow/hub/catalog/internal/catalog/modelcatalog/models"
 	sharedmodels "github.com/kubeflow/hub/catalog/internal/db/models"
-	"github.com/kubeflow/hub/catalog/internal/db/service"
+	"github.com/kubeflow/hub/catalog/internal/db/service" // for type name constants
 	mrmodels "github.com/kubeflow/hub/internal/platform/db/entity"
 )
 
@@ -75,13 +75,21 @@ type ModelLoader struct {
 	// Labels contains current labels loaded from the configuration files.
 	Labels *LabelCollection
 
-	services      service.Services
+	services      Services
 	handlers      []LoaderEventHandler
 	loadedSources map[string]bool // tracks which source IDs have been loaded
 }
 
+// UpdateServices replaces the loader's repository references after a database
+// reconnect. Safe to call from the OnBecomeLeader callback: the elector
+// drains all previous leader callbacks before invoking a new one, so this
+// always runs before NotifyLeader starts any leader-mode loading.
+func (l *ModelLoader) UpdateServices(services Services) {
+	l.services = services
+}
+
 // NewModelLoader creates a new ModelLoader with external state
-func NewModelLoader(services service.Services, state basecatalog.LoaderState) *ModelLoader {
+func NewModelLoader(services Services, state basecatalog.LoaderState) *ModelLoader {
 	paths := state.Paths()
 	// Convert paths to absolute for consistent origin ordering.
 	// This matches how loadOne converts paths before calling Merge.
@@ -133,12 +141,14 @@ func (l *ModelLoader) PerformLeaderOperations(ctx context.Context, allKnownSourc
 
 // ReloadParsing re-parses all config files into in-memory collections.
 // Called by the unified loader before computing combined source IDs for leader writes.
-func (l *ModelLoader) ReloadParsing() {
+func (l *ModelLoader) ReloadParsing() error {
+	var errs []error
 	for _, path := range l.state.Paths() {
 		if err := l.parseAndMerge(path); err != nil {
-			glog.Errorf("unable to reload model sources from %s: %v", path, err)
+			errs = append(errs, fmt.Errorf("unable to reload model sources from %s: %w", path, err))
 		}
 	}
+	return errors.Join(errs...)
 }
 
 // performLeaderWrites executes database write operations: removing orphaned
@@ -329,11 +339,11 @@ func (l *ModelLoader) updateDatabase(ctx context.Context) error {
 					}
 				}
 
-			for _, handler := range l.handlers {
-				if err := handler(ctx, record); err != nil {
-					glog.Errorf("%s: event handler error: %v", *attr.Name, err)
+				for _, handler := range l.handlers {
+					if err := handler(ctx, record); err != nil {
+						glog.Errorf("%s: event handler error: %v", *attr.Name, err)
+					}
 				}
-			}
 			}()
 		}
 	}()

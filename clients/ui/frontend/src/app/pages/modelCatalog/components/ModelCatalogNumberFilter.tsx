@@ -1,8 +1,8 @@
 import { Content, ContentVariants, FormGroup, NumberInput } from '@patternfly/react-core';
 import * as React from 'react';
 import { ModelCatalogNumberFilterKey } from '~/concepts/modelCatalog/const';
-import { useCatalogNumberFilterState } from '~/app/pages/modelCatalog/utils/modelCatalogUtils';
-import { CatalogFilterNumberOption } from '~/app/modelCatalogTypes';
+import { useCatalogNumberFilterState } from '~/app/pages/modelCatalog/hooks/useCatalogFilterState';
+import { CatalogFilterNumberOption } from '~/app/shared/components/catalog';
 
 type ModelCatalogNumberFilterProps<K extends ModelCatalogNumberFilterKey> = {
   title: string;

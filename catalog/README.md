@@ -266,7 +266,93 @@ customProperties:
   latency_p95_ms:
     metadataType: MetadataDoubleValue
     double_value: 108.3
+  min_vram_gb:
+    metadataType: MetadataDoubleValue
+    double_value: 265.0
+  modelcar_image_size:
+    metadataType: MetadataDoubleValue
+    double_value: 405.19
+  modelcar_image_size_bytes:
+    metadataType: MetadataDoubleValue
+    double_value: 405186009411
 ```
+
+##### Cold-Start and VRAM Metrics
+
+The catalog supports specialized performance metrics for model deployment planning:
+
+**Model-Level Metrics** (stored as custom properties on the model):
+
+- **Minimum VRAM** (`min_vram_gb`): The minimum GPU memory required to run the model, in gigabytes.
+- **Container Image Size**: Model container image size in both GB (`modelcar_image_size`) and exact bytes (`modelcar_image_size_bytes`).
+
+**Artifact-Level Metrics** (stored as separate Performance Artifacts):
+
+Cold-start load times are stored as individual artifacts, one per GPU configuration. Each artifact contains:
+- `performance_sub_type`: `"cold-start"`
+- `gpu_type`: GPU hardware type (e.g., "A100-80", "H100", "H200")
+- `gpu_count`: Number of GPUs required
+- `cold_start_time_to_load_seconds`: Time to load the model in seconds
+- `runtime_command`: Deployment command (optional)
+
+**Example metadata.json with cold-start data:**
+
+```json
+{
+  "id": "vendor/model-name",
+  "size": "229B",
+  "tensor_type": "FP8",
+  "min_vram_gb": 265.0,
+  "modelcar_image_size": 405.19,
+  "modelcar_image_size_bytes": 405186009411,
+  "cold_start_matrix": [
+    {
+      "gpu_type": "A100-80",
+      "gpu_count": 4,
+      "cold_start_time_to_load_seconds": 587.3,
+      "runtime_command": "vllm serve vendor/model-name --tensor-parallel-size 4"
+    },
+    {
+      "gpu_type": "H200",
+      "gpu_count": 4,
+      "cold_start_time_to_load_seconds": 806.7,
+      "runtime_command": "vllm serve vendor/model-name --tensor-parallel-size 4"
+    }
+  ]
+}
+```
+
+The `cold_start_matrix` array in the source metadata is processed by the catalog service and converted into separate Performance Artifacts (one per GPU configuration). These artifacts are queryable and filterable through the catalog API.
+
+**Use Cases:**
+- Filter models by available GPU memory constraints
+- Compare cold-start performance across different GPU types
+- Estimate deployment startup times
+- Plan infrastructure capacity and storage requirements
+- Copy runtime commands for deployment
+
+**UI Features:**
+
+The Model Catalog UI provides:
+- **Filters** for cold-start load time, minimum VRAM, and container size
+- **Sorting** by cold-start load time
+- **Performance View** toggle to access metrics
+- **Filter persistence** when navigating between catalog and performance insights
+- **Runtime command** display and copy functionality in model details
+
+**Artifact Storage:**
+
+Cold-start metrics are stored as Performance Artifacts in the Model Registry:
+- Each GPU configuration creates a separate artifact
+- Artifact naming: `cold-start-model-{model_id}-{gpu_type}-{gpu_count}`
+- Metrics type: `performance-metrics`
+- Performance sub-type: `cold-start`
+
+**Validation:**
+- GPU count must be > 0
+- GPU type must be non-empty
+- Duplicate configurations (same GPU type and count) are automatically deduplicated
+- Zero `cold_start_time_to_load_seconds` values are omitted from artifacts
 
 #### Deployment Metadata
 
@@ -343,8 +429,8 @@ kubectl create secret generic model-catalog-hf-api-key \
 kubectl rollout restart deployment model-catalog-server -n kubeflow
 ```
 
-**Custom Environment Variable Name:**
-You can configure a custom environment variable name per source by setting the `apiKeyEnvVar` property in your source configuration (see below). This is useful when you need different API keys for different sources.
+**Per-source API keys:**
+Set `apiKeyEnvVar` to use a different API key per source. The value must be `HF_API_KEY` (the default) or start with `HF_API_KEY_` — for example, `HF_API_KEY_META` for a Meta-specific key. Other env var names are rejected. This lets operators supply separate credentials for different HuggingFace organizations without exposing arbitrary environment variables.
 
 **Important Notes:**
 - **Private Models**: For private models, the API key must belong to an account that has been granted access to the model. Without proper access, the catalog service will not be able to retrieve model information.
@@ -374,10 +460,9 @@ catalogs:
       - "some-org/unwanted-model"
       - "another-org/test-*"  # Excludes all models starting with "test-"
 
-    # Optional: Configure a custom environment variable name for the API key
-    # Defaults to "HF_API_KEY" if not specified
+    # Optional: Use a per-source API key (must be HF_API_KEY or start with HF_API_KEY_)
     properties:
-      apiKeyEnvVar: "MY_CUSTOM_API_KEY_VAR"
+      apiKeyEnvVar: "HF_API_KEY_MYORG"
 ```
 
 #### Organization-Restricted Sources
@@ -473,7 +558,7 @@ The `excludedModels` property supports prefixes like `includedModels` and also s
 ## Development
 
 ### Prerequisites
-- Go >= 1.25
+- Go >= 1.26
 - Java >= 11.0 (for OpenAPI generation)
 - Node.js >= 20.0.0 (for GraphQL schema downloads)
 

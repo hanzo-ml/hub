@@ -14,7 +14,6 @@ import (
 	"github.com/kubeflow/hub/catalog/internal/catalog/basecatalog"
 	catalogmodels "github.com/kubeflow/hub/catalog/internal/catalog/modelcatalog/models"
 	model "github.com/kubeflow/hub/catalog/pkg/openapi"
-	"github.com/kubeflow/hub/internal/platform/apiutils"
 	models "github.com/kubeflow/hub/internal/platform/db/entity"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -31,29 +30,29 @@ func TestYamlModelToModelProviderRecord(t *testing.T) {
 			name: "complete model with all properties",
 			yamlModel: yamlModel{
 				CatalogModel: model.CatalogModel{
-					Name:                     "test-model",
-					Description:              apiutils.Of("Test model description"),
-					Readme:                   apiutils.Of("# Test Model\nThis is a test model."),
-					Maturity:                 apiutils.Of("Generally Available"),
-					Language:                 []string{"en", "fr"},
-					Tasks:                    []string{"text-generation", "nlp"},
-					ValidatedTasks:           []string{"text-generation", "tool-calling"},
-					Provider:                 apiutils.Of("IBM"),
-					Logo:                     apiutils.Of("https://example.com/logo.png"),
-					License:                  apiutils.Of("apache-2.0"),
-					LicenseLink:              apiutils.Of("https://www.apache.org/licenses/LICENSE-2.0"),
-					LibraryName:              apiutils.Of("transformers"),
+					Name:           "test-model",
+					Description:    new("Test model description"),
+					Readme:         new("# Test Model\nThis is a test model."),
+					Maturity:       new("Generally Available"),
+					Language:       []string{"en", "fr"},
+					Tasks:          []string{"text-generation", "nlp"},
+					ValidatedTasks: []string{"text-generation", "tool-calling"},
+					Provider:       new("IBM"),
+					Logo:           new("https://example.com/logo.png"),
+					License:        new("apache-2.0"),
+					LicenseLink:    new("https://www.apache.org/licenses/LICENSE-2.0"),
+					LibraryName:    new("transformers"),
 					ServingConfig: &model.ServingConfig{
 						ToolCalling: &model.ToolCallingConfig{
-							ToolCallParser:       apiutils.Of("granite"),
-							ChatTemplate:         apiutils.Of("opt/app-root/template/tool_chat_template_granite.jinja"),
-							EnableAutoToolChoice: model.PtrBool(true),
+							ToolCallParser:       new("granite"),
+							ChatTemplate:         new("opt/app-root/template/tool_chat_template_granite.jinja"),
+							EnableAutoToolChoice: new(true),
 							RequiredArgs:         []string{"--config_format granite"},
 						},
 					},
-					SourceId:                 apiutils.Of("test-source"),
-					CreateTimeSinceEpoch:     apiutils.Of("1678886400000"),
-					LastUpdateTimeSinceEpoch: apiutils.Of("1681564800000"),
+					SourceId:                 new("test-source"),
+					CreateTimeSinceEpoch:     new("1678886400000"),
+					LastUpdateTimeSinceEpoch: new("1681564800000"),
 					CustomProperties: map[string]model.MetadataValue{
 						"custom_key": {
 							MetadataStringValue: &model.MetadataStringValue{
@@ -69,8 +68,8 @@ func TestYamlModelToModelProviderRecord(t *testing.T) {
 							CatalogModelArtifact: &model.CatalogModelArtifact{
 								ArtifactType:             "model-artifact",
 								Uri:                      "https://example.com/model.tar.gz",
-								CreateTimeSinceEpoch:     apiutils.Of("1678886400000"),
-								LastUpdateTimeSinceEpoch: apiutils.Of("1681564800000"),
+								CreateTimeSinceEpoch:     new("1678886400000"),
+								LastUpdateTimeSinceEpoch: new("1681564800000"),
 								CustomProperties: map[string]model.MetadataValue{
 									"model_size": {
 										MetadataStringValue: &model.MetadataStringValue{
@@ -93,8 +92,8 @@ func TestYamlModelToModelProviderRecord(t *testing.T) {
 							CatalogMetricsArtifact: &model.CatalogMetricsArtifact{
 								ArtifactType:             "metrics-artifact",
 								MetricsType:              "evaluation-metrics",
-								CreateTimeSinceEpoch:     apiutils.Of("1678886400000"),
-								LastUpdateTimeSinceEpoch: apiutils.Of("1681564800000"),
+								CreateTimeSinceEpoch:     new("1678886400000"),
+								LastUpdateTimeSinceEpoch: new("1681564800000"),
 								CustomProperties: map[string]model.MetadataValue{
 									"framework": {
 										MetadataStringValue: &model.MetadataStringValue{
@@ -189,9 +188,9 @@ func TestYamlModelToModelProviderRecord(t *testing.T) {
 				err = json.Unmarshal([]byte(*regularPropMap["serving_config"].StringValue), &servingConfig)
 				require.NoError(t, err)
 				require.NotNil(t, servingConfig.ToolCalling)
-				assert.Equal(t, apiutils.Of("granite"), servingConfig.ToolCalling.ToolCallParser)
-				assert.Equal(t, apiutils.Of("opt/app-root/template/tool_chat_template_granite.jinja"), servingConfig.ToolCalling.ChatTemplate)
-				assert.Equal(t, model.PtrBool(true), servingConfig.ToolCalling.EnableAutoToolChoice)
+				assert.Equal(t, new("granite"), servingConfig.ToolCalling.ToolCallParser)
+				assert.Equal(t, new("opt/app-root/template/tool_chat_template_granite.jinja"), servingConfig.ToolCalling.ChatTemplate)
+				assert.Equal(t, new(true), servingConfig.ToolCalling.EnableAutoToolChoice)
 				assert.Equal(t, []string{"--config_format granite"}, servingConfig.ToolCalling.RequiredArgs)
 				assert.False(t, regularPropMap["serving_config"].IsCustomProperty)
 
@@ -445,9 +444,9 @@ func TestYamlModelToModelProviderRecord(t *testing.T) {
 					Name: "model-serving-config",
 					ServingConfig: &model.ServingConfig{
 						ToolCalling: &model.ToolCallingConfig{
-							ToolCallParser:       apiutils.Of("granite"),
-							ChatTemplate:         apiutils.Of("opt/app-root/template/tool_chat_template_granite.jinja"),
-							EnableAutoToolChoice: model.PtrBool(true),
+							ToolCallParser:       new("granite"),
+							ChatTemplate:         new("opt/app-root/template/tool_chat_template_granite.jinja"),
+							EnableAutoToolChoice: new(true),
 							RequiredArgs:         []string{"--config_format granite"},
 						},
 					},
@@ -469,9 +468,9 @@ func TestYamlModelToModelProviderRecord(t *testing.T) {
 				err := json.Unmarshal([]byte(*regularPropMap["serving_config"].StringValue), &servingConfig)
 				require.NoError(t, err)
 				require.NotNil(t, servingConfig.ToolCalling)
-				assert.Equal(t, apiutils.Of("granite"), servingConfig.ToolCalling.ToolCallParser)
-				assert.Equal(t, apiutils.Of("opt/app-root/template/tool_chat_template_granite.jinja"), servingConfig.ToolCalling.ChatTemplate)
-				assert.Equal(t, model.PtrBool(true), servingConfig.ToolCalling.EnableAutoToolChoice)
+				assert.Equal(t, new("granite"), servingConfig.ToolCalling.ToolCallParser)
+				assert.Equal(t, new("opt/app-root/template/tool_chat_template_granite.jinja"), servingConfig.ToolCalling.ChatTemplate)
+				assert.Equal(t, new(true), servingConfig.ToolCalling.EnableAutoToolChoice)
 				assert.Equal(t, []string{"--config_format granite"}, servingConfig.ToolCalling.RequiredArgs)
 			},
 		},
@@ -508,7 +507,7 @@ func TestYamlModelToModelProviderRecord(t *testing.T) {
 					Name: "model-partial-serving-config",
 					ServingConfig: &model.ServingConfig{
 						ToolCalling: &model.ToolCallingConfig{
-							EnableAutoToolChoice: model.PtrBool(false),
+							EnableAutoToolChoice: new(false),
 						},
 					},
 				},
@@ -529,7 +528,7 @@ func TestYamlModelToModelProviderRecord(t *testing.T) {
 				err := json.Unmarshal([]byte(*regularPropMap["serving_config"].StringValue), &servingConfig)
 				require.NoError(t, err)
 				require.NotNil(t, servingConfig.ToolCalling)
-				assert.Equal(t, model.PtrBool(false), servingConfig.ToolCalling.EnableAutoToolChoice)
+				assert.Equal(t, new(false), servingConfig.ToolCalling.EnableAutoToolChoice)
 				assert.Nil(t, servingConfig.ToolCalling.ToolCallParser)
 				assert.Nil(t, servingConfig.ToolCalling.ChatTemplate)
 				assert.Nil(t, servingConfig.ToolCalling.RequiredArgs)
@@ -547,8 +546,8 @@ func TestYamlModelToModelProviderRecord(t *testing.T) {
 							CatalogModelArtifact: &model.CatalogModelArtifact{
 								ArtifactType:             "model-artifact",
 								Uri:                      "https://example.com/model.bin",
-								CreateTimeSinceEpoch:     apiutils.Of("invalid-timestamp"),
-								LastUpdateTimeSinceEpoch: apiutils.Of("also-invalid"),
+								CreateTimeSinceEpoch:     new("invalid-timestamp"),
+								LastUpdateTimeSinceEpoch: new("also-invalid"),
 							},
 						},
 					},
@@ -573,8 +572,8 @@ func TestYamlModelToModelProviderRecord(t *testing.T) {
 			yamlModel: yamlModel{
 				CatalogModel: model.CatalogModel{
 					Name:                     "invalid-timestamp-model",
-					CreateTimeSinceEpoch:     apiutils.Of("invalid-timestamp"),
-					LastUpdateTimeSinceEpoch: apiutils.Of("also-invalid"),
+					CreateTimeSinceEpoch:     new("invalid-timestamp"),
+					LastUpdateTimeSinceEpoch: new("also-invalid"),
 				},
 			},
 			validateFunc: func(t *testing.T, record ModelProviderRecord) {
@@ -818,6 +817,163 @@ func TestYamlModelProviderInvalidPattern(t *testing.T) {
 	_, err := newYamlModelProvider(context.Background(), source, filepath.Dir(catalogPath))
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "pattern cannot be empty")
+}
+
+func TestYamlModelHardwareTagAsCustomProperty(t *testing.T) {
+	t.Run("single hardware_tag value", func(t *testing.T) {
+		ym := yamlModel{
+			CatalogModel: model.CatalogModel{
+				Name:  "test-vendor/single-hw",
+				Tasks: []string{"text-generation"},
+				CustomProperties: map[string]model.MetadataValue{
+					"hardware_tag": {
+						MetadataStringValue: &model.MetadataStringValue{
+							StringValue:  "Hardware Tag 1",
+							MetadataType: "MetadataStringValue",
+						},
+					},
+				},
+			},
+			Artifacts: []*yamlArtifact{
+				{CatalogArtifact: model.CatalogArtifact{
+					CatalogModelArtifact: &model.CatalogModelArtifact{
+						ArtifactType: "model-artifact",
+						Uri:          "oci://registry.example.com/test:latest",
+					},
+				}},
+			},
+		}
+
+		record := ym.ToModelProviderRecord()
+		require.NotNil(t, record.Model)
+		require.Nil(t, record.Error)
+
+		customPropMap := customPropsToMap(t, record)
+		assert.Contains(t, customPropMap, "hardware_tag")
+		assert.Equal(t, "Hardware Tag 1", *customPropMap["hardware_tag"].StringValue)
+		assert.True(t, customPropMap["hardware_tag"].IsCustomProperty)
+	})
+
+	t.Run("multiple hardware_tag values comma-separated", func(t *testing.T) {
+		ym := yamlModel{
+			CatalogModel: model.CatalogModel{
+				Name:  "test-vendor/multi-hw",
+				Tasks: []string{"text-generation"},
+				CustomProperties: map[string]model.MetadataValue{
+					"hardware_tag": {
+						MetadataStringValue: &model.MetadataStringValue{
+							StringValue:  "Hardware Tag 1,Hardware Tag 2",
+							MetadataType: "MetadataStringValue",
+						},
+					},
+				},
+			},
+			Artifacts: []*yamlArtifact{
+				{CatalogArtifact: model.CatalogArtifact{
+					CatalogModelArtifact: &model.CatalogModelArtifact{
+						ArtifactType: "model-artifact",
+						Uri:          "oci://registry.example.com/test:latest",
+					},
+				}},
+			},
+		}
+
+		record := ym.ToModelProviderRecord()
+		require.NotNil(t, record.Model)
+		require.Nil(t, record.Error)
+
+		customPropMap := customPropsToMap(t, record)
+		assert.Contains(t, customPropMap, "hardware_tag")
+		assert.Equal(t, "Hardware Tag 1,Hardware Tag 2", *customPropMap["hardware_tag"].StringValue)
+		assert.True(t, customPropMap["hardware_tag"].IsCustomProperty)
+	})
+
+	t.Run("empty hardware_tag produces no custom property", func(t *testing.T) {
+		ym := yamlModel{
+			CatalogModel: model.CatalogModel{
+				Name:  "test-vendor/empty-hw",
+				Tasks: []string{"text-generation"},
+				CustomProperties: map[string]model.MetadataValue{
+					"hardware_tag": {
+						MetadataStringValue: &model.MetadataStringValue{
+							StringValue:  "",
+							MetadataType: "MetadataStringValue",
+						},
+					},
+					"model_type": {
+						MetadataStringValue: &model.MetadataStringValue{
+							StringValue:  "predictive",
+							MetadataType: "MetadataStringValue",
+						},
+					},
+				},
+			},
+			Artifacts: []*yamlArtifact{
+				{CatalogArtifact: model.CatalogArtifact{
+					CatalogModelArtifact: &model.CatalogModelArtifact{
+						ArtifactType: "model-artifact",
+						Uri:          "oci://registry.example.com/test:latest",
+					},
+				}},
+			},
+		}
+
+		record := ym.ToModelProviderRecord()
+		require.NotNil(t, record.Model)
+		require.Nil(t, record.Error)
+
+		customPropMap := customPropsToMap(t, record)
+		assert.NotContains(t, customPropMap, "hardware_tag")
+		assert.Contains(t, customPropMap, "model_type")
+		assert.Equal(t, "predictive", *customPropMap["model_type"].StringValue)
+	})
+
+	t.Run("missing hardware_tag produces no custom property", func(t *testing.T) {
+		ym := yamlModel{
+			CatalogModel: model.CatalogModel{
+				Name:  "test-vendor/no-hw",
+				Tasks: []string{"text-generation"},
+				CustomProperties: map[string]model.MetadataValue{
+					"model_type": {
+						MetadataStringValue: &model.MetadataStringValue{
+							StringValue:  "generative",
+							MetadataType: "MetadataStringValue",
+						},
+					},
+				},
+			},
+			Artifacts: []*yamlArtifact{
+				{CatalogArtifact: model.CatalogArtifact{
+					CatalogModelArtifact: &model.CatalogModelArtifact{
+						ArtifactType: "model-artifact",
+						Uri:          "oci://registry.example.com/test:latest",
+					},
+				}},
+			},
+		}
+
+		record := ym.ToModelProviderRecord()
+		require.NotNil(t, record.Model)
+		require.Nil(t, record.Error)
+
+		customPropMap := customPropsToMap(t, record)
+		assert.NotContains(t, customPropMap, "hardware_tag")
+		assert.Contains(t, customPropMap, "model_type")
+		assert.Equal(t, "generative", *customPropMap["model_type"].StringValue)
+	})
+}
+
+func customPropsToMap(t *testing.T, record ModelProviderRecord) map[string]models.Properties {
+	t.Helper()
+	customProps := record.Model.GetCustomProperties()
+	m := make(map[string]models.Properties)
+	if customProps == nil {
+		return m
+	}
+	for _, prop := range *customProps {
+		m[prop.Name] = prop
+	}
+	return m
 }
 
 func writeMiniCatalog(t *testing.T, modelNames []string) string {

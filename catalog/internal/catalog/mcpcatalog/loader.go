@@ -12,7 +12,6 @@ import (
 	"github.com/golang/glog"
 	"github.com/kubeflow/hub/catalog/internal/catalog/basecatalog"
 	"github.com/kubeflow/hub/catalog/internal/catalog/mcpcatalog/models"
-	"github.com/kubeflow/hub/catalog/internal/db/service"
 	mrmodels "github.com/kubeflow/hub/internal/platform/db/entity"
 )
 
@@ -45,7 +44,7 @@ type MCPLoader struct {
 	// Sources contains current MCP source information loaded from the configuration files.
 	Sources *MCPSourceCollection
 
-	services service.Services
+	services Services
 	handlers []MCPLoaderEventHandler
 
 	closerMu sync.Mutex
@@ -63,8 +62,16 @@ func (ml *MCPLoader) setCloser(closer func()) {
 	ml.closer = closer
 }
 
+// UpdateServices replaces the loader's repository references after a database
+// reconnect. Safe to call from the OnBecomeLeader callback: the elector
+// drains all previous leader callbacks before invoking a new one, so this
+// always runs before NotifyLeader starts any leader-mode loading.
+func (ml *MCPLoader) UpdateServices(services Services) {
+	ml.services = services
+}
+
 // NewMCPLoaderWithState creates a new MCP loader with external state
-func NewMCPLoaderWithState(services service.Services, state basecatalog.LoaderState) *MCPLoader {
+func NewMCPLoaderWithState(services Services, state basecatalog.LoaderState) *MCPLoader {
 	paths := state.Paths()
 	return &MCPLoader{
 		state:    state,
@@ -119,12 +126,14 @@ func (ml *MCPLoader) PerformLeaderOperations(ctx context.Context, allKnownSource
 
 // ReloadParsing re-parses all config files into in-memory collections.
 // Called by the unified loader before computing combined source IDs for leader writes.
-func (ml *MCPLoader) ReloadParsing() {
+func (ml *MCPLoader) ReloadParsing() error {
+	var errs []error
 	for _, path := range ml.state.Paths() {
 		if err := ml.parseAndMerge(path); err != nil {
-			glog.Errorf("unable to reload MCP sources from %s: %v", path, err)
+			errs = append(errs, fmt.Errorf("unable to reload MCP sources from %s: %w", path, err))
 		}
 	}
+	return errors.Join(errs...)
 }
 
 // parseAndMerge parses a config file and merges its MCP sources into the collection.

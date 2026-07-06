@@ -3,7 +3,7 @@ import * as React from 'react';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { McpCatalogContext } from '~/app/context/mcpCatalog/McpCatalogContext';
-import type { McpCatalogContextType } from '~/app/pages/mcpCatalog/types/mcpCatalogContext';
+import type { McpCatalogContextType } from '~/app/context/mcpCatalog/types';
 import type { McpServer } from '~/app/mcpServerCatalogTypes';
 import type { McpServersResult } from '~/app/hooks/mcpServerCatalog/useMcpServersBySourceLabel';
 import { useMcpServersBySourceLabelWithAPI } from '~/app/hooks/mcpServerCatalog/useMcpServersBySourceLabel';
@@ -49,6 +49,10 @@ const defaultContext: McpCatalogContextType = {
   filterOptions: null,
   filterOptionsLoaded: true,
   filterOptionsLoadError: undefined,
+  emptyCategoryLabels: new Set<string>(),
+  categoriesResolved: true,
+  reportCategoryEmpty: jest.fn(),
+  setCategoryCount: jest.fn(),
 };
 
 const defaultHookResult: McpServersResult = {

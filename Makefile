@@ -66,14 +66,14 @@ gen/converter: internal/converter/generated/converter.go
 api/openapi/model-registry.yaml: api/openapi/src/model-registry.yaml api/openapi/src/lib/*.yaml bin/yq
 	scripts/merge_openapi.sh model-registry.yaml
 
-api/openapi/catalog.yaml: api/openapi/src/catalog.yaml api/openapi/src/lib/*.yaml bin/yq
-	scripts/merge_openapi.sh catalog.yaml
+api/openapi/catalog.yaml: api/openapi/src/catalog.yaml api/openapi/src/lib/*.yaml $(wildcard api/openapi/src/plugins/*.yaml) bin/yq
+	scripts/merge_catalog_specs.sh catalog.yaml
 
 # validate the openapi schema
 .PHONY: openapi/validate
 openapi/validate: bin/openapi-generator-cli bin/yq
 	@scripts/merge_openapi.sh --check model-registry.yaml || (echo "api/openapi/model-registry.yaml is incorrectly formatted. Run 'make api/openapi/model-registry.yaml' to fix it."; exit 1)
-	@scripts/merge_openapi.sh --check catalog.yaml || (echo "$< is incorrectly formatted. Run 'make api/openapi/catalog.yaml' to fix it."; exit 1)
+	@scripts/merge_catalog_specs.sh --check catalog.yaml || (echo "api/openapi/catalog.yaml is incorrectly formatted. Run 'make api/openapi/catalog.yaml' to fix it."; exit 1)
 	$(OPENAPI_GENERATOR) validate -i api/openapi/model-registry.yaml
 	$(OPENAPI_GENERATOR) validate -i api/openapi/catalog.yaml
 
@@ -176,7 +176,7 @@ bin/envtest:
 
 GOLANGCI_LINT ?= ${PROJECT_BIN}/golangci-lint
 bin/golangci-lint:
-	curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(PROJECT_BIN) v2.9.0
+	curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/main/install.sh | sh -s -- -b $(PROJECT_BIN) v2.12.2
 
 GOVERTER ?= ${PROJECT_BIN}/goverter
 bin/goverter:

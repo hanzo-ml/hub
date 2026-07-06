@@ -1,28 +1,23 @@
-import React from 'react';
 import { capitalize } from '@patternfly/react-core';
-import { ModelCatalogContext } from '~/app/context/modelCatalog/ModelCatalogContext';
+import { CatalogSource, CatalogSourceList } from '~/app/shared/types/catalogTypes';
 import {
   CatalogArtifacts,
   CatalogArtifactType,
   CatalogFilterOptions,
   CatalogFilterOptionsList,
-  CatalogLabel,
-  CatalogLabelList,
   CatalogModel,
   CatalogModelArtifact,
   CatalogModelDetailsParams,
-  CatalogSource,
-  CatalogSourceList,
-  ModelCatalogFilterStates,
-  ModelCatalogStringFilterValueType,
   MetricsType,
-  ModelCatalogFilterKey,
-  SourceLabel,
+  ModelCatalogFilterStates,
+  ToolCallingConfig,
 } from '~/app/modelCatalogTypes';
-import { getLabels } from '~/app/pages/modelRegistry/screens/utils';
+import { getLabels, getCustomPropString } from '~/app/pages/modelRegistry/screens/utils';
+import { getDoubleValue } from '~/app/utils';
 import {
   ModelCatalogStringFilterKey,
   ModelCatalogNumberFilterKey,
+  ModelCatalogFilterKey,
   ALL_LATENCY_FILTER_KEYS,
   LatencyMetricFieldName,
   DEFAULT_PERFORMANCE_FILTERS_QUERY_NAME,
@@ -36,12 +31,12 @@ import {
   ModelCatalogTask,
   MATCH_ALL_FILTER_KEYS,
 } from '~/concepts/modelCatalog/const';
-import { isSourceStatusWithModels } from '~/concepts/modelCatalogSettings/const';
 import { ModelRegistryCustomProperties, ModelRegistryMetadataType } from '~/app/types';
 import {
   buildCustomPropertiesWithModelType,
   getModelTypeStoredValueFromCustomProperties,
 } from '~/app/pages/modelRegistry/screens/RegisterModel/registerModelTypeUtils';
+import { eqFilter, inFilter, andFilter } from '~/app/shared/components/catalog';
 
 /**
  * Prefix used by the backend for artifact-specific filter options.
@@ -78,25 +73,6 @@ export const encodeParams = (params: CatalogModelDetailsParams): CatalogModelDet
       encodeURIComponent(value).replace(/\./g, '%252E'),
     ]),
   );
-
-export const filterEnabledCatalogSources = (
-  catalogSources: CatalogSourceList | null,
-): CatalogSourceList | null => {
-  if (!catalogSources) {
-    return null;
-  }
-
-  // Filter sources that are enabled AND have available models (including partially-available)
-  const filteredItems = catalogSources.items?.filter(
-    (source) => source.enabled !== false && isSourceStatusWithModels(source.status),
-  );
-
-  return {
-    ...catalogSources,
-    items: filteredItems || [],
-    size: filteredItems?.length || 0,
-  };
-};
 
 export const getModelArtifactUri = (artifacts: CatalogArtifacts[]): string => {
   const modelArtifact = findModelArtifact(artifacts);
@@ -192,47 +168,23 @@ export const shouldShowValidatedInsights = (
 
 export const hasValidatedToolCalling = (model: CatalogModel): boolean =>
   model.validatedTasks?.includes(ModelCatalogTask.TOOL_CALLING) === true &&
-  model.servingConfig?.toolCalling != null;
+  !!model.servingConfig?.toolCalling?.toolCallParser;
 
-export const useCatalogStringFilterState = <K extends ModelCatalogStringFilterKey>(
-  filterKey: K,
-): {
-  isSelected: (value: ModelCatalogStringFilterValueType[K]) => boolean;
-  setSelected: (value: string, selected: boolean) => void;
-} => {
-  type Value = ModelCatalogStringFilterValueType[K];
-  const { filterData, setFilterData } = React.useContext(ModelCatalogContext);
-  const selections: string[] = filterData[filterKey];
-  const isValidStringState = (state: string[]): state is ModelCatalogFilterStates[K] =>
-    Object.values(ModelCatalogStringFilterKey).includes(filterKey);
-  const isSelected = React.useCallback((value: Value) => selections.includes(value), [selections]);
-  const setSelected = (value: string, selected: boolean) => {
-    const nextState = selected
-      ? [...selections, value]
-      : selections.filter((item) => item !== value);
-    if (isValidStringState(nextState)) {
-      setFilterData(filterKey, nextState);
-    }
-  };
-
-  return { isSelected, setSelected };
-};
-
-export const useCatalogNumberFilterState = (
-  filterKey: ModelCatalogNumberFilterKey,
-): {
-  value: number | undefined;
-  setValue: (value: number | undefined) => void;
-} => {
-  const { filterData, setFilterData } = React.useContext(ModelCatalogContext);
-  const value = filterData[filterKey];
-  const setValue = React.useCallback(
-    (newValue: number | undefined) => {
-      setFilterData(filterKey, newValue);
-    },
-    [filterKey, setFilterData],
-  );
-  return { value, setValue };
+export const getToolCallingArgs = (config?: ToolCallingConfig): string => {
+  const parts: string[] = [];
+  if (config?.enableAutoToolChoice) {
+    parts.push('--enable-auto-tool-choice');
+  }
+  if (config?.toolCallParser) {
+    parts.push(`--tool-call-parser ${config.toolCallParser}`);
+  }
+  if (config?.chatTemplate) {
+    parts.push(`--chat-template ${config.chatTemplate}`);
+  }
+  if (config?.requiredArgs) {
+    parts.push(...config.requiredArgs);
+  }
+  return parts.join(' \\\n');
 };
 
 const isArrayOfSelections = (
@@ -247,6 +199,9 @@ const isArrayOfSelections = (
 const KNOWN_NUMERIC_FILTER_IDS: string[] = [
   ...ALL_LATENCY_FILTER_KEYS,
   ModelCatalogNumberFilterKey.MAX_RPS,
+  ModelCatalogNumberFilterKey.COLD_START_LOAD_TIME,
+  ModelCatalogNumberFilterKey.MIN_VRAM,
+  ModelCatalogNumberFilterKey.IMAGE_SIZE,
 ];
 
 /**
@@ -273,8 +228,8 @@ const getNumericFilterOperator = (options: CatalogFilterOptionsList, filterId: s
     // Return the operator from the namedQuery (e.g., '<=', '<', '>')
     return fieldFilter.operator;
   }
-  // Fall back to '<' if this filter isn't in the namedQuery
-  return '<';
+  // Fall back to '<=' if this filter isn't in the namedQuery
+  return '<=';
 };
 
 const isFilterIdInMap = (
@@ -331,27 +286,23 @@ export const getSortParams = (
     return recentPublishSort;
   }
 
+  if (effectiveSortBy === ModelCatalogSortOption.LOWEST_COLD_START) {
+    return {
+      orderBy: ModelCatalogNumberFilterKey.COLD_START_LOAD_TIME,
+      sortOrder: SortOrder.ASC,
+    };
+  }
+
   // effectiveSortBy must be LOWEST_LATENCY at this point
   if (!activeLatencyField) {
-    // Fallback to recent publish if no latency field is available
     return recentPublishSort;
   }
 
-  // activeLatencyField is already in the correct format: artifacts.{metric}_{percentile}.double_value
-  // (e.g., artifacts.ttft_p90.double_value, artifacts.e2e_mean.double_value, artifacts.itl_p95.double_value)
-  // This matches the filter key format used in filterQuery, so we can use it directly
   return {
     orderBy: activeLatencyField,
-    sortOrder: SortOrder.ASC, // Lowest first (ascending)
+    sortOrder: SortOrder.ASC,
   };
 };
-
-const wrapInQuotes = (v: string): string => `'${v.replace(/'/g, "''")}'`;
-
-const eqFilter = (k: string, v: string) => `${k}=${wrapInQuotes(v)}`;
-const inFilter = (k: string, values: string[]) =>
-  `${k} IN (${values.map((v) => wrapInQuotes(v)).join(',')})`;
-const andFilter = (k: string, values: string[]) => values.map((v) => eqFilter(k, v)).join(' AND ');
 
 const isMatchAllFilter = (filterId: string): boolean =>
   MATCH_ALL_FILTER_KEYS.some((key) => key === filterId);
@@ -384,21 +335,32 @@ export type FilterQueryTarget = 'models' | 'artifacts';
 
 /**
  * Determines if a filter should be included based on the target endpoint.
- * - For models: Include all filters except RPS (which is passed as a separate param)
- * - For artifacts: Only include filters that have the artifacts.* prefix
+ * - For models: Include all filters except RPS (which is passed as a separate param).
+ *   Cold-start load time is excluded when includeColdStart is false.
+ * - For artifacts: Only include filters that have the artifacts.* prefix.
+ *   The includeColdStart parameter has no effect on the artifacts target.
  */
-const shouldIncludeFilter = (filterId: string, target: FilterQueryTarget): boolean => {
-  // RPS is always passed as a separate param, not in filterQuery
+const shouldIncludeFilter = (
+  filterId: string,
+  target: FilterQueryTarget,
+  includeColdStart: boolean,
+): boolean => {
   if (filterId === ModelCatalogNumberFilterKey.MAX_RPS) {
     return false;
   }
 
+  if (
+    filterId === ModelCatalogNumberFilterKey.COLD_START_LOAD_TIME &&
+    target === 'models' &&
+    !includeColdStart
+  ) {
+    return false;
+  }
+
   if (target === 'models') {
-    // For models, include all filters (except RPS which is already excluded)
     return true;
   }
 
-  // For artifacts, only include filters with the artifacts.* prefix
   return hasArtifactsPrefix(filterId);
 };
 
@@ -469,6 +431,8 @@ const serializeFilterEntry = (
  * @param target - The target endpoint:
  *   - 'models': Include all filters (except RPS), use filter keys directly
  *   - 'artifacts': Only include artifact-prefixed filters, strip the prefix in output
+ * @param includeColdStart - Whether to include the cold-start filter in the AND clause.
+ *   Should be true only when performance view is enabled.
  *
  * Note: RPS is NOT included in filterQuery for either target - it's passed as targetRPS param.
  */
@@ -476,14 +440,13 @@ export const filtersToFilterQuery = (
   filterData: ModelCatalogFilterStates,
   options: CatalogFilterOptionsList,
   target: FilterQueryTarget = 'models',
-): string => {
-  const serializedFilters: string[] = Object.entries(filterData)
-    .filter(([filterId]) => shouldIncludeFilter(filterId, target))
-    .map(([filterId, data]) => serializeFilterEntry(filterId, data, options, target));
-
-  const nonEmptyFilters = serializedFilters.filter((v) => !!v);
-  return nonEmptyFilters.length === 0 ? '' : nonEmptyFilters.join(' AND ');
-};
+  includeColdStart = true,
+): string =>
+  Object.entries(filterData)
+    .filter(([filterId]) => shouldIncludeFilter(filterId, target, includeColdStart))
+    .map(([filterId, data]) => serializeFilterEntry(filterId, data, options, target))
+    .filter((v) => !!v)
+    .join(' AND ');
 
 /**
  * Returns a copy of filterData with only basic (non-performance) filters.
@@ -509,42 +472,6 @@ export const getBasicFiltersOnly = (
   result[ModelCatalogStringFilterKey.HARDWARE_CONFIGURATION] = [];
 
   return result;
-};
-
-export const getUniqueSourceLabels = (catalogSources: CatalogSourceList | null): string[] => {
-  if (!catalogSources || !catalogSources.items) {
-    return [];
-  }
-
-  const allLabels = new Set<string>();
-
-  catalogSources.items.forEach((source) => {
-    // Only include labels from sources that are enabled AND have models (available or partially-available)
-    if (source.enabled && isSourceStatusWithModels(source.status) && source.labels.length > 0) {
-      source.labels.forEach((label) => {
-        if (label.trim()) {
-          allLabels.add(label.trim());
-        }
-      });
-    }
-  });
-
-  return Array.from(allLabels);
-};
-
-export const hasSourcesWithoutLabels = (catalogSources: CatalogSourceList | null): boolean => {
-  if (!catalogSources || !catalogSources.items) {
-    return false;
-  }
-
-  return catalogSources.items.some((source) => {
-    // Only consider sources that are enabled AND have models (available or partially-available)
-    if (source.enabled !== false && isSourceStatusWithModels(source.status)) {
-      // Check if source has no labels or only empty/whitespace labels
-      return source.labels.length === 0 || source.labels.every((label) => !label.trim());
-    }
-    return false;
-  });
 };
 
 export const getSourceFromSourceId = (
@@ -616,168 +543,8 @@ export const isValueDifferentFromDefault = (
   return currentValue !== defaultValue;
 };
 
-/**
- * Filters catalog sources to only include those with discoverable models.
- * A source has models if its status is AVAILABLE or PARTIALLY_AVAILABLE.
- * This is used to filter out disabled sources or sources with errors from the switcher.
- */
-export const filterSourcesWithModels = (
-  catalogSources: CatalogSourceList | null,
-): CatalogSourceList | null => {
-  if (!catalogSources) {
-    return null;
-  }
-
-  const filteredItems = catalogSources.items?.filter((source) =>
-    isSourceStatusWithModels(source.status),
-  );
-
-  return {
-    ...catalogSources,
-    items: filteredItems || [],
-    size: filteredItems?.length || 0,
-  };
-};
-
-/**
- * Checks if there are any catalog sources that have models available.
- * Returns true if at least one source has status AVAILABLE or PARTIALLY_AVAILABLE.
- */
-export const hasSourcesWithModels = (catalogSources: CatalogSourceList | null): boolean => {
-  if (!catalogSources?.items) {
-    return false;
-  }
-
-  return catalogSources.items.some((source) => isSourceStatusWithModels(source.status));
-};
-
 export const generateCategoryName = (name: string): string =>
   name.toLowerCase().endsWith('models') ? name : `${name} models`;
-
-/**
- * Finds a label from the catalog labels list that matches the given source label name.
- * Handles the special case where sourceLabel is 'null' (other/unlabeled sources).
- * @param sourceLabel The label string from a source (or SourceLabel.other for unlabeled sources)
- * @param catalogLabels The list of catalog labels from the API
- * @returns The matching CatalogLabel or undefined if not found
- */
-export const findLabelData = (
-  sourceLabel: string | undefined,
-  catalogLabels: CatalogLabelList | null,
-): CatalogLabel | undefined => {
-  if (!catalogLabels?.items || !sourceLabel) {
-    return undefined;
-  }
-
-  // Special case: sourceLabel is 'null' (SourceLabel.other) - look for label with name: null
-  if (sourceLabel === SourceLabel.other) {
-    return catalogLabels.items.find((label) => label.name === null);
-  }
-
-  // Normal case: find label with matching name
-  return catalogLabels.items.find((label) => label.name === sourceLabel);
-};
-
-/**
- * Gets the display name for a source label, using the catalog labels data if available.
- * Falls back to the raw label name with the given suffix appended if no display name is found.
- * @param sourceLabel The label string from a source (or SourceLabel.other for unlabeled sources)
- * @param catalogLabels The list of catalog labels from the API
- * @param otherFallback Display name for sources without labels (default: 'Other models')
- * @param categorySuffix Suffix appended to the label name when no display name exists (default: 'models')
- * @returns The display name to show in the UI
- */
-export const getLabelDisplayName = (
-  sourceLabel: string | undefined,
-  catalogLabels: CatalogLabelList | null,
-  otherFallback = 'Other models',
-  categorySuffix = 'models',
-): string => {
-  if (!sourceLabel) {
-    return '';
-  }
-
-  const labelData = findLabelData(sourceLabel, catalogLabels);
-
-  if (labelData?.displayName) {
-    return labelData.displayName;
-  }
-
-  if (sourceLabel === SourceLabel.other) {
-    return otherFallback;
-  }
-
-  return sourceLabel.toLowerCase().endsWith(categorySuffix)
-    ? sourceLabel
-    : `${sourceLabel} ${categorySuffix}`;
-};
-
-/**
- * Gets the description for a source label from the catalog labels data.
- * @param sourceLabel The label string from a source (or SourceLabel.other for unlabeled sources)
- * @param catalogLabels The list of catalog labels from the API
- * @returns The description text or undefined if not found
- */
-export const getLabelDescription = (
-  sourceLabel: string | undefined,
-  catalogLabels: CatalogLabelList | null,
-): string | undefined => {
-  const labelData = findLabelData(sourceLabel, catalogLabels);
-  return labelData?.description;
-};
-
-/**
- * Orders source labels according to the order in the catalog labels list.
- * Labels that appear in catalogLabels are ordered first (in the order they appear in the API),
- * followed by any labels found on sources that don't appear in catalogLabels.
- * @param sourceLabels Array of unique source labels from the sources
- * @param catalogLabels The list of catalog labels from the API
- * @returns Ordered array of source labels
- */
-export const orderLabelsByPriority = (
-  sourceLabels: string[],
-  catalogLabels: CatalogLabelList | null,
-): string[] => {
-  if (!catalogLabels?.items) {
-    return sourceLabels;
-  }
-
-  const orderedLabels: string[] = [];
-  const remainingLabels = new Set(sourceLabels);
-
-  // First, add labels in the order they appear in catalogLabels
-  catalogLabels.items.forEach((catalogLabel) => {
-    // Skip the null entry (it's handled separately as "other models")
-    if (catalogLabel.name === null) {
-      return;
-    }
-
-    if (remainingLabels.has(catalogLabel.name)) {
-      orderedLabels.push(catalogLabel.name);
-      remainingLabels.delete(catalogLabel.name);
-    }
-  });
-
-  // Then add any remaining labels that weren't in catalogLabels
-  orderedLabels.push(...Array.from(remainingLabels));
-
-  return orderedLabels;
-};
-
-export const getActiveSourceLabels = (
-  catalogSources: CatalogSourceList | null,
-  catalogLabels: CatalogLabelList | null,
-): string[] => {
-  const enabledSources = filterEnabledCatalogSources(catalogSources);
-  const uniqueLabels = getUniqueSourceLabels(enabledSources);
-  const orderedLabels = orderLabelsByPriority(uniqueLabels, catalogLabels);
-
-  if (hasSourcesWithoutLabels(enabledSources)) {
-    return [...orderedLabels, SourceLabel.other];
-  }
-
-  return orderedLabels;
-};
 
 /**
  * Formats model type value for display in the UI.
@@ -812,6 +579,32 @@ export const formatModelTypeDisplay = (modelTypeRaw: string | null): string => {
 export const getCatalogModelTypePropertyForRegistration = (
   customProperties?: ModelRegistryCustomProperties,
 ): ModelRegistryCustomProperties => {
-  const stored = getModelTypeStoredValueFromCustomProperties(customProperties);
+  const stored = getModelTypeStoredValueFromCustomProperties(customProperties) ?? ModelType.UNKNOWN;
   return buildCustomPropertiesWithModelType(undefined, stored);
+};
+
+export const getModelSizeFromCustomProperties = (
+  customProperties?: ModelRegistryCustomProperties,
+): string => {
+  if (!customProperties) {
+    return '';
+  }
+  const doubleVal = getDoubleValue(customProperties, 'modelcar_image_size');
+  if (doubleVal > 0) {
+    return `${doubleVal.toFixed(2)} GB`;
+  }
+  return getCustomPropString(customProperties, CatalogModelCustomPropertyKey.MODEL_SIZE);
+};
+
+export const getMinimumVramFromCustomProperties = (
+  customProperties?: ModelRegistryCustomProperties,
+): string => {
+  if (!customProperties) {
+    return '';
+  }
+  const doubleVal = getDoubleValue(customProperties, CatalogModelCustomPropertyKey.MINIMUM_VRAM);
+  if (doubleVal > 0) {
+    return `${doubleVal.toFixed(2)} GB`;
+  }
+  return getCustomPropString(customProperties, CatalogModelCustomPropertyKey.MINIMUM_VRAM);
 };

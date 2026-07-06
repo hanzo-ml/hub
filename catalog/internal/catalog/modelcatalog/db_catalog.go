@@ -13,9 +13,7 @@ import (
 	"github.com/kubeflow/hub/catalog/internal/catalog/basecatalog"
 	"github.com/kubeflow/hub/catalog/internal/catalog/modelcatalog/models"
 	sharedmodels "github.com/kubeflow/hub/catalog/internal/db/models"
-	"github.com/kubeflow/hub/catalog/internal/db/service"
 	apimodels "github.com/kubeflow/hub/catalog/pkg/openapi"
-	"github.com/kubeflow/hub/internal/platform/apiutils"
 	"github.com/kubeflow/hub/internal/converter"
 	mrmodels "github.com/kubeflow/hub/internal/platform/db/entity"
 	"github.com/kubeflow/hub/pkg/api"
@@ -30,7 +28,7 @@ type dbCatalogImpl struct {
 	sources                   *SourceCollection
 }
 
-func NewDBCatalog(services service.Services, sources *SourceCollection) APIProvider {
+func NewDBCatalog(services Services, sources *SourceCollection) APIProvider {
 	return &dbCatalogImpl{
 		catalogArtifactRepository: services.CatalogArtifactRepository,
 		catalogModelRepository:    services.CatalogModelRepository,
@@ -40,8 +38,8 @@ func NewDBCatalog(services service.Services, sources *SourceCollection) APIProvi
 	}
 }
 
-func (d *dbCatalogImpl) GetModel(ctx context.Context, modelName string, sourceID string) (*apimodels.CatalogModel, error) {
-	// Resolve by namespaced identifier: sourceId:modelName
+// resolveModel looks up a single model by display name and source ID, returning the DB model.
+func (d *dbCatalogImpl) resolveModel(modelName, sourceID string) (models.CatalogModel, error) {
 	namespacedName := sourceID + ":" + modelName
 	modelsList, err := d.catalogModelRepository.List(models.CatalogModelListOptions{
 		Name:      &namespacedName,
@@ -50,16 +48,34 @@ func (d *dbCatalogImpl) GetModel(ctx context.Context, modelName string, sourceID
 	if err != nil {
 		return nil, err
 	}
-
 	if len(modelsList.Items) == 0 {
 		return nil, fmt.Errorf("no models found for name=%v: %w", modelName, api.ErrNotFound)
 	}
-
 	if len(modelsList.Items) > 1 {
 		return nil, fmt.Errorf("multiple models found for name=%v: %w", modelName, api.ErrNotFound)
 	}
+	return modelsList.Items[0], nil
+}
 
-	model := mapDBModelToAPIModel(modelsList.Items[0])
+func (d *dbCatalogImpl) GetModel(ctx context.Context, modelName string, sourceID string) (*apimodels.CatalogModel, error) {
+	dbModel, err := d.resolveModel(modelName, sourceID)
+	if err != nil {
+		return nil, err
+	}
+
+	model, err := mapDBModelToAPIModel(dbModel)
+	if err != nil {
+		return nil, fmt.Errorf("error mapping model %s: %w", modelName, err)
+	}
+
+	modelDBID := *dbModel.GetID()
+	artifactCounts, err := d.catalogArtifactRepository.CountByParentIDs([]int32{modelDBID})
+	if err != nil {
+		return nil, fmt.Errorf("error counting artifacts for model %s: %w", modelName, err)
+	}
+	if counts, ok := artifactCounts[modelDBID]; ok && len(counts) > 0 {
+		model.ArtifactCounts = &counts
+	}
 
 	return &model, nil
 }
@@ -109,7 +125,12 @@ func (d *dbCatalogImpl) ListModels(ctx context.Context, params ListModelsParams)
 	}
 
 	for _, model := range modelsList.Items {
-		modelList.Items = append(modelList.Items, mapDBModelToAPIModel(model))
+		apiModel, err := mapDBModelToAPIModel(model)
+		if err != nil {
+			glog.Warningf("error mapping model, skipping: %v", err)
+			continue
+		}
+		modelList.Items = append(modelList.Items, apiModel)
 	}
 
 	modelList.NextPageToken = modelsList.NextPageToken
@@ -135,7 +156,7 @@ func (d *dbCatalogImpl) GetArtifacts(ctx context.Context, modelName string, sour
 
 	nextPageToken := params.NextPageToken
 
-	m, err := d.GetModel(ctx, modelName, sourceID)
+	dbModel, err := d.resolveModel(modelName, sourceID)
 	if err != nil {
 		if errors.Is(err, api.ErrNotFound) {
 			return apimodels.CatalogArtifactList{}, fmt.Errorf("invalid model name '%s' for source '%s': %w", modelName, sourceID, api.ErrBadRequest)
@@ -143,12 +164,7 @@ func (d *dbCatalogImpl) GetArtifacts(ctx context.Context, modelName string, sour
 		return apimodels.CatalogArtifactList{}, err
 	}
 
-	parentResourceID, err := strconv.ParseInt(*m.Id, 10, 32)
-	if err != nil {
-		return apimodels.CatalogArtifactList{}, err
-	}
-
-	parentResourceID32 := int32(parentResourceID)
+	parentResourceID32 := *dbModel.GetID()
 
 	var filterQueryPtr *string
 	if params.FilterQuery != "" {
@@ -245,29 +261,13 @@ func (d *dbCatalogImpl) GetFilterOptions(ctx context.Context) (*apimodels.Filter
 }
 
 func (d *dbCatalogImpl) GetPerformanceArtifacts(ctx context.Context, modelName string, sourceID string, params ListPerformanceArtifactsParams) (apimodels.CatalogArtifactList, error) {
-	// Resolve by namespaced identifier: sourceId:modelName
-	namespacedName := sourceID + ":" + modelName
-	// Get the model to validate it exists and get its ID
-	modelsList, err := d.catalogModelRepository.List(models.CatalogModelListOptions{
-		Name:      &namespacedName,
-		SourceIDs: &[]string{sourceID},
-	})
+	dbModel, err := d.resolveModel(modelName, sourceID)
 	if err != nil {
 		return apimodels.CatalogArtifactList{}, err
 	}
 
-	if len(modelsList.Items) == 0 {
-		return apimodels.CatalogArtifactList{}, fmt.Errorf("no models found for name=%v: %w", modelName, api.ErrNotFound)
-	}
-
-	if len(modelsList.Items) > 1 {
-		return apimodels.CatalogArtifactList{}, fmt.Errorf("multiple models found for name=%v: %w", modelName, api.ErrNotFound)
-	}
-
-	model := modelsList.Items[0]
-
 	serviceParams := PerformanceArtifactParams{
-		ModelID:               *model.GetID(),
+		ModelID:               *dbModel.GetID(),
 		TargetRPS:             params.TargetRPS,
 		Recommendations:       params.Recommendations,
 		FilterQuery:           params.FilterQuery,
@@ -307,7 +307,7 @@ func (d *dbCatalogImpl) GetPerformanceArtifacts(ctx context.Context, modelName s
 	return *artifactList, nil
 }
 
-func mapDBModelToAPIModel(m models.CatalogModel) apimodels.CatalogModel {
+func mapDBModelToAPIModel(m models.CatalogModel) (apimodels.CatalogModel, error) {
 	res := apimodels.CatalogModel{}
 
 	id := strconv.FormatInt(int64(*m.GetID()), 10)
@@ -407,20 +407,14 @@ func mapDBModelToAPIModel(m models.CatalogModel) apimodels.CatalogModel {
 
 	// Map custom properties
 	if m.GetCustomProperties() != nil && len(*m.GetCustomProperties()) > 0 {
-		customProps := make(map[string]apimodels.MetadataValue, len(*m.GetCustomProperties()))
-		for _, prop := range *m.GetCustomProperties() {
-			if prop.StringValue != nil {
-				customProps[prop.Name] = apimodels.MetadataStringValueAsMetadataValue(
-					apimodels.NewMetadataStringValue(*prop.StringValue, "MetadataStringValue"),
-				)
-			}
+		customPropsMap, err := converter.MapEmbedMDCustomProperties(*m.GetCustomProperties())
+		if err != nil {
+			return apimodels.CatalogModel{}, fmt.Errorf("error mapping custom properties: %w", err)
 		}
-		if len(customProps) > 0 {
-			res.CustomProperties = customProps
-		}
+		res.CustomProperties = convertMetadataValueMap(customPropsMap)
 	}
 
-	return res
+	return res, nil
 }
 
 func mapDBArtifactToAPIArtifact(a sharedmodels.CatalogArtifact) (apimodels.CatalogArtifact, error) {
@@ -606,6 +600,7 @@ func (d *dbCatalogImpl) FindModelsWithRecommendedLatency(
 	paretoParams ParetoFilteringParams,
 	sourceIDs []string,
 	query string,
+	sortOrder string,
 ) (*apimodels.CatalogModelList, error) {
 	// Get all models first (without pagination)
 	var sourceIDsPtr *[]string
@@ -623,7 +618,7 @@ func (d *dbCatalogImpl) FindModelsWithRecommendedLatency(
 		Query:     queryPtr,
 		Pagination: mrmodels.Pagination{
 			FilterQuery: pagination.FilterQuery,
-			PageSize:    apiutils.Of(int32(0)), // Get all models
+			PageSize:    new(int32(0)), // Get all models
 		},
 	})
 	if err != nil {
@@ -639,7 +634,11 @@ func (d *dbCatalogImpl) FindModelsWithRecommendedLatency(
 
 	// Get recommended latency for each model
 	for _, model := range allModels.Items {
-		apiModel := mapDBModelToAPIModel(model)
+		apiModel, err := mapDBModelToAPIModel(model)
+		if err != nil {
+			glog.Warningf("error mapping model: %v, skipping", err)
+			continue
+		}
 
 		// Extract source ID from model properties
 		sourceID := ""
@@ -680,20 +679,25 @@ func (d *dbCatalogImpl) FindModelsWithRecommendedLatency(
 		})
 	}
 
-	// Sort: models with latency first (ascending), then models without latency
+	// Sort: models with latency first (ascending), then models without latency.
+	// ASC (default) = lowest latency first (most recommended); DESC = highest latency first.
+	descending := strings.EqualFold(sortOrder, "DESC")
 	sort.Slice(modelsWithLatency, func(i, j int) bool {
 		latencyI, latencyJ := modelsWithLatency[i].Latency, modelsWithLatency[j].Latency
 
 		if latencyI == nil && latencyJ == nil {
-			return false // Maintain original order for models without latency
+			return false
 		}
 		if latencyI == nil {
-			return false // Models without latency go last
+			return false // Models without latency always last
 		}
 		if latencyJ == nil {
-			return true // Models with latency go first
+			return true // Models with latency always first
 		}
-		return *latencyI < *latencyJ // Sort by latency ascending
+		if descending {
+			return *latencyI > *latencyJ
+		}
+		return *latencyI < *latencyJ
 	})
 
 	// Apply pagination to sorted results

@@ -5,11 +5,30 @@ import (
 
 	"github.com/kubeflow/hub/catalog/internal/catalog/mcpcatalog/models"
 	"github.com/kubeflow/hub/catalog/internal/converter"
-	"github.com/kubeflow/hub/internal/platform/apiutils"
 	dbmodels "github.com/kubeflow/hub/internal/platform/db/entity"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestConvertDbMCPServerToOpenapi_IncludesDisplayName(t *testing.T) {
+	baseName := "test-server"
+	displayName := "Test Server"
+	version := "1.0.0"
+	server := &models.MCPServerImpl{
+		Attributes: &models.MCPServerAttributes{
+			Name: &baseName,
+		},
+		Properties: &[]dbmodels.Properties{
+			{Name: "displayName", StringValue: &displayName},
+			{Name: "version", StringValue: &version},
+		},
+	}
+
+	result := converter.ConvertDbMCPServerToOpenapi(server)
+	require.NotNil(t, result)
+	require.NotNil(t, result.DisplayName)
+	assert.Equal(t, displayName, *result.DisplayName)
+}
 
 func TestConvertDbMCPToolToOpenapi_StripsQualifiedPrefix(t *testing.T) {
 	tests := []struct {
@@ -39,10 +58,10 @@ func TestConvertDbMCPToolToOpenapi_StripsQualifiedPrefix(t *testing.T) {
 			accessType := "read_only"
 			tool := &models.MCPServerToolImpl{
 				Attributes: &models.MCPServerToolAttributes{
-					Name: apiutils.Of(tc.storedName),
+					Name: new(tc.storedName),
 				},
 				Properties: &[]dbmodels.Properties{
-					{Name: "accessType", StringValue: apiutils.Of(accessType)},
+					{Name: "accessType", StringValue: new(accessType)},
 				},
 			}
 

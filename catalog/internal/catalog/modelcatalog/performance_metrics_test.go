@@ -2,10 +2,14 @@ package modelcatalog
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/kubeflow/hub/catalog/internal/catalog/modelcatalog/models"
+	dbmodels "github.com/kubeflow/hub/internal/platform/db/entity"
 )
 
 func TestParseMetadataJSON(t *testing.T) {
@@ -948,18 +952,31 @@ func TestUnmarshalJSON_EdgeCases(t *testing.T) {
 				t.Errorf("performanceRecord.UnmarshalJSON() error = %v, wantErr %v", err, tt.wantErr)
 			}
 		})
+
+		t.Run(tt.name+" (securityEvaluationRecord)", func(t *testing.T) {
+			var sr securityEvaluationRecord
+			err := sr.UnmarshalJSON([]byte(tt.jsonData))
+
+			if (err != nil) != tt.wantErr {
+				t.Errorf("securityEvaluationRecord.UnmarshalJSON() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
 	}
 }
 
 func TestParseMetadataJSON_NewFields(t *testing.T) {
 	tests := []struct {
-		name           string
-		jsonData       string
-		wantID         string
-		wantSize       *string
-		wantTensorType *string
-		wantVariantID  *string
-		wantErr        bool
+		name                       string
+		jsonData                   string
+		wantID                     string
+		wantSize                   *string
+		wantTensorType             *string
+		wantVariantID              *string
+		wantMinVRAMGB              *float64
+		wantModelcarImageSize      *float64
+		wantModelcarImageSizeBytes *int64
+		wantColdStartMatrix        []coldStartEntry
+		wantErr                    bool
 	}{
 		{
 			name: "complete metadata with all new fields",
@@ -1111,6 +1128,88 @@ func TestParseMetadataJSON_NewFields(t *testing.T) {
 			wantVariantID:  &[]string{"stu901kl-2def-456s-tu90-123456789abc"}[0],
 			wantErr:        false,
 		},
+		{
+			name: "metadata with vRAM and cold-start matrix fields",
+			jsonData: `{
+				"id": "sample-model/test-405b-instruct",
+				"size": "405B params",
+				"tensor_type": "FP8",
+				"variant_group_id": "vwx234mn-5678-901v-wx23-456789abcdef",
+				"min_vram_gb": 265.0,
+				"cold_start_matrix": [
+					{
+						"gpu_type": "A100-80",
+						"gpu_count": 4,
+						"cold_start_time_to_load_seconds": 587.3
+					},
+					{
+						"gpu_type": "B200",
+						"gpu_count": 2,
+						"cold_start_time_to_load_seconds": 559.9
+					}
+				]
+			}`,
+			wantID:         "sample-model/test-405b-instruct",
+			wantSize:       &[]string{"405B params"}[0],
+			wantTensorType: &[]string{"FP8"}[0],
+			wantVariantID:  &[]string{"vwx234mn-5678-901v-wx23-456789abcdef"}[0],
+			wantMinVRAMGB:  &[]float64{265.0}[0],
+			wantColdStartMatrix: []coldStartEntry{
+				{GPUType: "A100-80", GPUCount: 4, ColdStartTimeToLoadSeconds: 587.3},
+				{GPUType: "B200", GPUCount: 2, ColdStartTimeToLoadSeconds: 559.9},
+			},
+			wantErr: false,
+		},
+		{
+			name: "metadata with modelcar image size fields",
+			jsonData: `{
+				"id": "sample-model/test-405b-instruct",
+				"size": "405B params",
+				"tensor_type": "FP8",
+				"min_vram_gb": 265.0,
+				"modelcar_image_size": 405.19,
+				"modelcar_image_size_bytes": 405186009411
+			}`,
+			wantID:                     "sample-model/test-405b-instruct",
+			wantSize:                   &[]string{"405B params"}[0],
+			wantTensorType:             &[]string{"FP8"}[0],
+			wantMinVRAMGB:              &[]float64{265.0}[0],
+			wantModelcarImageSize:      &[]float64{405.19}[0],
+			wantModelcarImageSizeBytes: &[]int64{405186009411}[0],
+			wantErr:                    false,
+		},
+		{
+			name: "metadata with runtime_command in cold-start matrix",
+			jsonData: `{
+				"id": "RedHatAI/MiniMax-M2.5",
+				"size": "229B",
+				"tensor_type": "FP8",
+				"min_vram_gb": 265.0,
+				"cold_start_matrix": [
+					{
+						"gpu_type": "A100-80",
+						"gpu_count": 4,
+						"cold_start_time_to_load_seconds": 587.3,
+						"runtime_command": "python3 -m vllm.entrypoints.openai.api_server --model RedHatAI/MiniMax-M2.5 --tensor-parallel-size 4"
+					},
+					{
+						"gpu_type": "H200",
+						"gpu_count": 4,
+						"cold_start_time_to_load_seconds": 806.7,
+						"runtime_command": "python3 -m vllm.entrypoints.openai.api_server --model RedHatAI/MiniMax-M2.5 --tensor-parallel-size 4"
+					}
+				]
+			}`,
+			wantID:         "RedHatAI/MiniMax-M2.5",
+			wantSize:       &[]string{"229B"}[0],
+			wantTensorType: &[]string{"FP8"}[0],
+			wantMinVRAMGB:  &[]float64{265.0}[0],
+			wantColdStartMatrix: []coldStartEntry{
+				{GPUType: "A100-80", GPUCount: 4, ColdStartTimeToLoadSeconds: 587.3, RuntimeCommand: "python3 -m vllm.entrypoints.openai.api_server --model RedHatAI/MiniMax-M2.5 --tensor-parallel-size 4"},
+				{GPUType: "H200", GPUCount: 4, ColdStartTimeToLoadSeconds: 806.7, RuntimeCommand: "python3 -m vllm.entrypoints.openai.api_server --model RedHatAI/MiniMax-M2.5 --tensor-parallel-size 4"},
+			},
+			wantErr: false,
+		},
 	}
 
 	for _, tt := range tests {
@@ -1144,6 +1243,39 @@ func TestParseMetadataJSON_NewFields(t *testing.T) {
 			// Test VariantGroupID field
 			if (got.VariantGroupID == nil) != (tt.wantVariantID == nil) || (got.VariantGroupID != nil && tt.wantVariantID != nil && *got.VariantGroupID != *tt.wantVariantID) {
 				t.Errorf("parseMetadataJSON() VariantGroupID = %v, want %v", got.VariantGroupID, tt.wantVariantID)
+			}
+
+			// Test MinVRAMGB field
+			if (got.MinVRAMGB == nil) != (tt.wantMinVRAMGB == nil) {
+				t.Errorf("parseMetadataJSON() MinVRAMGB nil mismatch: got %v, want %v", got.MinVRAMGB, tt.wantMinVRAMGB)
+			} else if got.MinVRAMGB != nil && *got.MinVRAMGB != *tt.wantMinVRAMGB {
+				t.Errorf("parseMetadataJSON() MinVRAMGB = %v, want %v", *got.MinVRAMGB, *tt.wantMinVRAMGB)
+			}
+
+			// Test ModelcarImageSize field
+			if (got.ModelcarImageSize == nil) != (tt.wantModelcarImageSize == nil) {
+				t.Errorf("parseMetadataJSON() ModelcarImageSize nil mismatch: got %v, want %v", got.ModelcarImageSize, tt.wantModelcarImageSize)
+			} else if got.ModelcarImageSize != nil && *got.ModelcarImageSize != *tt.wantModelcarImageSize {
+				t.Errorf("parseMetadataJSON() ModelcarImageSize = %v, want %v", *got.ModelcarImageSize, *tt.wantModelcarImageSize)
+			}
+
+			// Test ModelcarImageSizeBytes field
+			if (got.ModelcarImageSizeBytes == nil) != (tt.wantModelcarImageSizeBytes == nil) {
+				t.Errorf("parseMetadataJSON() ModelcarImageSizeBytes nil mismatch: got %v, want %v", got.ModelcarImageSizeBytes, tt.wantModelcarImageSizeBytes)
+			} else if got.ModelcarImageSizeBytes != nil && *got.ModelcarImageSizeBytes != *tt.wantModelcarImageSizeBytes {
+				t.Errorf("parseMetadataJSON() ModelcarImageSizeBytes = %v, want %v", *got.ModelcarImageSizeBytes, *tt.wantModelcarImageSizeBytes)
+			}
+
+			// Test ColdStartMatrix field
+			if len(got.ColdStartMatrix) != len(tt.wantColdStartMatrix) {
+				t.Errorf("parseMetadataJSON() ColdStartMatrix length = %d, want %d", len(got.ColdStartMatrix), len(tt.wantColdStartMatrix))
+			} else {
+				for i, entry := range got.ColdStartMatrix {
+					want := tt.wantColdStartMatrix[i]
+					if entry.GPUType != want.GPUType || entry.GPUCount != want.GPUCount || entry.ColdStartTimeToLoadSeconds != want.ColdStartTimeToLoadSeconds || entry.RuntimeCommand != want.RuntimeCommand {
+						t.Errorf("parseMetadataJSON() ColdStartMatrix[%d] = %+v, want %+v", i, entry, want)
+					}
+				}
 			}
 		})
 	}
@@ -1379,6 +1511,456 @@ func TestBuildModelDirCache_CollisionWarning(t *testing.T) {
 	}
 }
 
+func TestEnrichCatalogModelFromMetadata_NewFields(t *testing.T) {
+	modelName := "test-vendor/test-405b-instruct"
+	modelID := int32(1)
+
+	existingModel := &models.CatalogModelImpl{
+		ID: &modelID,
+		Attributes: &models.CatalogModelAttributes{
+			Name: &modelName,
+		},
+	}
+
+	minVRAM := 80.0
+	metadata := metadataJSON{
+		ID:        modelName,
+		MinVRAMGB: &minVRAM,
+		ColdStartMatrix: []coldStartEntry{
+			{GPUType: "A100", GPUCount: 2, ColdStartTimeToLoadSeconds: 127.3},
+			{GPUType: "H100", GPUCount: 1, ColdStartTimeToLoadSeconds: 68.9},
+		},
+	}
+
+	mockRepo := &mockPerfModelRepo{}
+
+	err := enrichCatalogModelFromMetadata(existingModel, metadata, mockRepo)
+	if err != nil {
+		t.Fatalf("enrichCatalogModelFromMetadata() error = %v", err)
+	}
+
+	props := existingModel.GetCustomProperties()
+	if props == nil {
+		t.Fatal("expected custom properties to be set, got nil")
+	}
+
+	propMap := make(map[string]float64)
+	for _, p := range *props {
+		if p.DoubleValue != nil {
+			propMap[p.Name] = *p.DoubleValue
+		}
+	}
+
+	if v, ok := propMap["min_vram_gb"]; !ok {
+		t.Error("expected custom property 'min_vram_gb' to be set")
+	} else if v != 80.0 {
+		t.Errorf("min_vram_gb = %v, want %v", v, 80.0)
+	}
+
+	// Verify cold_start_matrix is set as a JSON string custom property
+	stringPropMap := make(map[string]string)
+	for _, p := range *props {
+		if p.StringValue != nil {
+			stringPropMap[p.Name] = *p.StringValue
+		}
+	}
+	csJSON, ok := stringPropMap["cold_start_matrix"]
+	if !ok {
+		t.Fatal("expected custom property 'cold_start_matrix' to be set")
+	}
+	var csMatrix []coldStartEntry
+	if err := json.Unmarshal([]byte(csJSON), &csMatrix); err != nil {
+		t.Fatalf("cold_start_matrix is not valid JSON: %v", err)
+	}
+	if len(csMatrix) != 2 {
+		t.Fatalf("cold_start_matrix length = %d, want 2", len(csMatrix))
+	}
+	if csMatrix[0].GPUType != "A100" || csMatrix[0].GPUCount != 2 || csMatrix[0].ColdStartTimeToLoadSeconds != 127.3 {
+		t.Errorf("cold_start_matrix[0] = %+v, want {A100, 2, 127.3}", csMatrix[0])
+	}
+	if csMatrix[1].GPUType != "H100" || csMatrix[1].GPUCount != 1 || csMatrix[1].ColdStartTimeToLoadSeconds != 68.9 {
+		t.Errorf("cold_start_matrix[1] = %+v, want {H100, 1, 68.9}", csMatrix[1])
+	}
+}
+
+func TestEnrichCatalogModelFromMetadata_EmptyColdStartMatrix(t *testing.T) {
+	modelName := "test-vendor/test-model"
+	modelID := int32(2)
+
+	existingModel := &models.CatalogModelImpl{
+		ID: &modelID,
+		Attributes: &models.CatalogModelAttributes{
+			Name: &modelName,
+		},
+	}
+
+	size := "8B params"
+	metadata := metadataJSON{
+		ID:              modelName,
+		Size:            &size,
+		ColdStartMatrix: []coldStartEntry{},
+	}
+
+	mockRepo := &mockPerfModelRepo{}
+
+	err := enrichCatalogModelFromMetadata(existingModel, metadata, mockRepo)
+	if err != nil {
+		t.Fatalf("enrichCatalogModelFromMetadata() error = %v", err)
+	}
+
+	props := existingModel.GetCustomProperties()
+	if props == nil {
+		t.Fatal("expected custom properties to be set, got nil")
+	}
+
+	for _, p := range *props {
+		if p.Name == "cold_start_matrix" {
+			t.Error("cold_start_matrix should not be set when matrix is empty")
+		}
+	}
+}
+
+func TestCreateColdStartArtifact(t *testing.T) {
+	modelID := int32(42)
+	typeID := int32(7)
+
+	tests := []struct {
+		name           string
+		entry          coldStartEntry
+		wantGPUType    string
+		wantGPUCount   int
+		wantSeconds    *float64
+		wantExtID      string
+		wantArtName    string
+		wantRuntimeCmd string
+	}{
+		{
+			name: "valid entry with float seconds",
+			entry: coldStartEntry{
+				GPUType:                    "A100-80",
+				GPUCount:                   4,
+				ColdStartTimeToLoadSeconds: 587.3,
+				RuntimeCommand:             "python3 -m vllm.entrypoints.openai.api_server --model RedHatAI/MiniMax-M2.5 --max-model-len -1 --tensor-parallel-size 4 --trust-remote-code",
+			},
+			wantGPUType:    "A100-80",
+			wantGPUCount:   4,
+			wantSeconds:    &[]float64{587.3}[0],
+			wantExtID:      "cold-start-model-42-A100-80-4",
+			wantArtName:    "cold-start-model-42-A100-80-4",
+			wantRuntimeCmd: "python3 -m vllm.entrypoints.openai.api_server --model RedHatAI/MiniMax-M2.5 --max-model-len -1 --tensor-parallel-size 4 --trust-remote-code",
+		},
+		{
+			name: "valid entry with integer-like seconds",
+			entry: coldStartEntry{
+				GPUType:                    "H100",
+				GPUCount:                   1,
+				ColdStartTimeToLoadSeconds: 68.0,
+				RuntimeCommand:             "python3 -m vllm.entrypoints.openai.api_server --model RedHatAI/MiniMax-M2.5 --max-model-len -1 --tensor-parallel-size 1 --trust-remote-code",
+			},
+			wantGPUType:    "H100",
+			wantGPUCount:   1,
+			wantSeconds:    &[]float64{68.0}[0],
+			wantExtID:      "cold-start-model-42-H100-1",
+			wantArtName:    "cold-start-model-42-H100-1",
+			wantRuntimeCmd: "python3 -m vllm.entrypoints.openai.api_server --model RedHatAI/MiniMax-M2.5 --max-model-len -1 --tensor-parallel-size 1 --trust-remote-code",
+		},
+		{
+			name: "zero seconds value omits seconds property",
+			entry: coldStartEntry{
+				GPUType:                    "B200",
+				GPUCount:                   2,
+				ColdStartTimeToLoadSeconds: 0,
+				RuntimeCommand:             "python3 -m vllm.entrypoints.openai.api_server --model RedHatAI/MiniMax-M2.5 --max-model-len -1 --tensor-parallel-size 2 --trust-remote-code",
+			},
+			wantGPUType:    "B200",
+			wantGPUCount:   2,
+			wantSeconds:    nil,
+			wantExtID:      "cold-start-model-42-B200-2",
+			wantArtName:    "cold-start-model-42-B200-2",
+			wantRuntimeCmd: "python3 -m vllm.entrypoints.openai.api_server --model RedHatAI/MiniMax-M2.5 --max-model-len -1 --tensor-parallel-size 2 --trust-remote-code",
+		},
+		{
+			name: "empty runtime_command omits property",
+			entry: coldStartEntry{
+				GPUType:                    "H200",
+				GPUCount:                   4,
+				ColdStartTimeToLoadSeconds: 806.7,
+			},
+			wantGPUType:    "H200",
+			wantGPUCount:   4,
+			wantSeconds:    &[]float64{806.7}[0],
+			wantExtID:      "cold-start-model-42-H200-4",
+			wantArtName:    "cold-start-model-42-H200-4",
+			wantRuntimeCmd: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			externalID := coldStartExternalID(modelID, tt.entry)
+			artifact := createColdStartArtifact(tt.entry, externalID, modelID, typeID)
+
+			if artifact == nil {
+				t.Fatal("expected non-nil artifact")
+			}
+
+			// Verify type and metrics type
+			if *artifact.TypeID != typeID {
+				t.Errorf("TypeID = %d, want %d", *artifact.TypeID, typeID)
+			}
+			attrs := artifact.GetAttributes()
+			if attrs.MetricsType != models.MetricsTypePerformance {
+				t.Errorf("MetricsType = %q, want %q", attrs.MetricsType, models.MetricsTypePerformance)
+			}
+
+			// Verify naming
+			if *attrs.ExternalID != tt.wantExtID {
+				t.Errorf("ExternalID = %q, want %q", *attrs.ExternalID, tt.wantExtID)
+			}
+			if *attrs.Name != tt.wantArtName {
+				t.Errorf("Name = %q, want %q", *attrs.Name, tt.wantArtName)
+			}
+
+			// Verify timestamps are set
+			if attrs.CreateTimeSinceEpoch == nil || *attrs.CreateTimeSinceEpoch <= 0 {
+				t.Error("expected CreateTimeSinceEpoch to be set")
+			}
+			if attrs.LastUpdateTimeSinceEpoch == nil || *attrs.LastUpdateTimeSinceEpoch <= 0 {
+				t.Error("expected LastUpdateTimeSinceEpoch to be set")
+			}
+
+			// Verify custom properties
+			customProps := artifact.GetCustomProperties()
+			if customProps == nil {
+				t.Fatal("expected custom properties to be set")
+			}
+			stringPropMap := make(map[string]string)
+			doublePropMap := make(map[string]float64)
+			intPropMap := make(map[string]int32)
+			for _, p := range *customProps {
+				if p.StringValue != nil {
+					stringPropMap[p.Name] = *p.StringValue
+				}
+				if p.DoubleValue != nil {
+					doublePropMap[p.Name] = *p.DoubleValue
+				}
+				if p.IntValue != nil {
+					intPropMap[p.Name] = *p.IntValue
+				}
+			}
+
+			if stringPropMap["performance_sub_type"] != "cold-start" {
+				t.Errorf("performance_sub_type = %v, want %q", stringPropMap["performance_sub_type"], "cold-start")
+			}
+			if stringPropMap["gpu_type"] != tt.wantGPUType {
+				t.Errorf("gpu_type = %v, want %q", stringPropMap["gpu_type"], tt.wantGPUType)
+			}
+			if intPropMap["gpu_count"] != int32(tt.wantGPUCount) {
+				t.Errorf("gpu_count = %v, want %d", intPropMap["gpu_count"], tt.wantGPUCount)
+			}
+			if tt.wantRuntimeCmd != "" {
+				if stringPropMap["runtime_command"] != tt.wantRuntimeCmd {
+					t.Errorf("runtime_command = %v, want %q", stringPropMap["runtime_command"], tt.wantRuntimeCmd)
+				}
+			} else {
+				if _, exists := stringPropMap["runtime_command"]; exists {
+					t.Error("expected runtime_command to be absent when not provided")
+				}
+			}
+			if tt.wantSeconds != nil {
+				if doublePropMap["cold_start_time_to_load_seconds"] != *tt.wantSeconds {
+					t.Errorf("cold_start_time_to_load_seconds = %v, want %v", doublePropMap["cold_start_time_to_load_seconds"], *tt.wantSeconds)
+				}
+			} else {
+				if _, exists := doublePropMap["cold_start_time_to_load_seconds"]; exists {
+					t.Error("expected cold_start_time_to_load_seconds to be absent for zero value")
+				}
+			}
+		})
+	}
+}
+
+func TestProcessModelArtifactsBatch_ColdStartOnly(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	coldStartMatrix := []coldStartEntry{
+		{GPUType: "A100", GPUCount: 2, ColdStartTimeToLoadSeconds: 127.3},
+		{GPUType: "H100", GPUCount: 1, ColdStartTimeToLoadSeconds: 68.9},
+	}
+
+	modelID := int32(1)
+	typeID := int32(7)
+
+	var savedArtifacts []models.CatalogMetricsArtifact
+	mockRepo := &mockMetricsArtifactRepo{
+		listResult: &dbmodels.ListWrapper[models.CatalogMetricsArtifact]{},
+		batchSaveFunc: func(artifacts []models.CatalogMetricsArtifact, parentID *int32) ([]models.CatalogMetricsArtifact, error) {
+			savedArtifacts = artifacts
+			return artifacts, nil
+		},
+	}
+
+	count, err := processModelArtifactsBatch(tmpDir, modelID, "test-model", nil, coldStartMatrix, mockRepo, typeID)
+	if err != nil {
+		t.Fatalf("processModelArtifactsBatch() error = %v", err)
+	}
+
+	if count != 2 {
+		t.Errorf("processModelArtifactsBatch() returned count = %d, want 2", count)
+	}
+
+	if len(savedArtifacts) != 2 {
+		t.Fatalf("expected 2 saved artifacts, got %d", len(savedArtifacts))
+	}
+
+	// Verify both artifacts have performance metrics type
+	for _, a := range savedArtifacts {
+		if a.GetAttributes().MetricsType != models.MetricsTypePerformance {
+			t.Errorf("expected MetricsType %q, got %q", models.MetricsTypePerformance, a.GetAttributes().MetricsType)
+		}
+	}
+}
+
+func TestProcessModelArtifactsBatch_ColdStartDedup(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	coldStartMatrix := []coldStartEntry{
+		{GPUType: "A100", GPUCount: 2, ColdStartTimeToLoadSeconds: 127.3},
+	}
+
+	modelID := int32(1)
+	typeID := int32(7)
+	existingExternalID := "cold-start-model-1-A100-2"
+
+	mockRepo := &mockMetricsArtifactRepo{
+		listResult: &dbmodels.ListWrapper[models.CatalogMetricsArtifact]{
+			Items: []models.CatalogMetricsArtifact{
+				&models.CatalogMetricsArtifactImpl{
+					Attributes: &models.CatalogMetricsArtifactAttributes{
+						ExternalID: &existingExternalID,
+					},
+				},
+			},
+			Size: 1,
+		},
+	}
+
+	count, err := processModelArtifactsBatch(tmpDir, modelID, "test-model", nil, coldStartMatrix, mockRepo, typeID)
+	if err != nil {
+		t.Fatalf("processModelArtifactsBatch() error = %v", err)
+	}
+
+	if count != 0 {
+		t.Errorf("processModelArtifactsBatch() returned count = %d, want 0 (all duplicates)", count)
+	}
+}
+
+func TestProcessModelArtifactsBatch_ColdStartInvalidGPUCount(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	coldStartMatrix := []coldStartEntry{
+		{GPUType: "A100", GPUCount: -1, ColdStartTimeToLoadSeconds: 100.0},
+		{GPUType: "H100", GPUCount: 0, ColdStartTimeToLoadSeconds: 50.0},
+		{GPUType: "", GPUCount: 4, ColdStartTimeToLoadSeconds: 200.0},
+		{GPUType: "H200", GPUCount: 2, ColdStartTimeToLoadSeconds: 75.5},
+	}
+
+	modelID := int32(1)
+	typeID := int32(7)
+
+	var savedArtifacts []models.CatalogMetricsArtifact
+	mockRepo := &mockMetricsArtifactRepo{
+		listResult: &dbmodels.ListWrapper[models.CatalogMetricsArtifact]{},
+		batchSaveFunc: func(artifacts []models.CatalogMetricsArtifact, parentID *int32) ([]models.CatalogMetricsArtifact, error) {
+			savedArtifacts = artifacts
+			return artifacts, nil
+		},
+	}
+
+	count, err := processModelArtifactsBatch(tmpDir, modelID, "test-model", nil, coldStartMatrix, mockRepo, typeID)
+	if err != nil {
+		t.Fatalf("processModelArtifactsBatch() error = %v", err)
+	}
+
+	if count != 1 {
+		t.Errorf("processModelArtifactsBatch() returned count = %d, want 1 (only H200 entry is valid)", count)
+	}
+
+	if len(savedArtifacts) != 1 {
+		t.Fatalf("expected 1 saved artifact, got %d", len(savedArtifacts))
+	}
+
+	attrs := savedArtifacts[0].GetAttributes()
+	wantExtID := "cold-start-model-1-H200-2"
+	if *attrs.ExternalID != wantExtID {
+		t.Errorf("expected saved artifact ExternalID = %q, got %q", wantExtID, *attrs.ExternalID)
+	}
+}
+
+func TestProcessModelArtifactsBatch_ColdStartNamesUniqueAcrossModels(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	coldStartMatrix := []coldStartEntry{
+		{GPUType: "H100", GPUCount: 4, ColdStartTimeToLoadSeconds: 105.7},
+		{GPUType: "H200", GPUCount: 2, ColdStartTimeToLoadSeconds: 98.5},
+	}
+
+	typeID := int32(7)
+
+	// Collect all artifact names across both models to check uniqueness
+	allNames := map[string]int32{}
+
+	for _, modelID := range []int32{1, 2} {
+		mockRepo := &mockMetricsArtifactRepo{
+			listResult: &dbmodels.ListWrapper[models.CatalogMetricsArtifact]{},
+			batchSaveFunc: func(artifacts []models.CatalogMetricsArtifact, parentID *int32) ([]models.CatalogMetricsArtifact, error) {
+				for _, a := range artifacts {
+					name := *a.GetAttributes().Name
+					if prev, exists := allNames[name]; exists {
+						t.Errorf("artifact name %q from model %d collides with model %d — would violate UNIQUE(type_id, name) constraint", name, modelID, prev)
+					}
+					allNames[name] = modelID
+				}
+				return artifacts, nil
+			},
+		}
+
+		_, err := processModelArtifactsBatch(tmpDir, modelID, fmt.Sprintf("test-model-%d", modelID), nil, coldStartMatrix, mockRepo, typeID)
+		if err != nil {
+			t.Fatalf("processModelArtifactsBatch() model %d error = %v", modelID, err)
+		}
+	}
+
+	if len(allNames) != 4 {
+		t.Errorf("expected 4 unique artifact names (2 GPU configs x 2 models), got %d", len(allNames))
+	}
+}
+
+// mockMetricsArtifactRepo is a minimal mock for CatalogMetricsArtifactRepository used in batch tests
+type mockMetricsArtifactRepo struct {
+	listResult    *dbmodels.ListWrapper[models.CatalogMetricsArtifact]
+	batchSaveFunc func([]models.CatalogMetricsArtifact, *int32) ([]models.CatalogMetricsArtifact, error)
+}
+
+func (m *mockMetricsArtifactRepo) GetByID(id int32) (models.CatalogMetricsArtifact, error) {
+	return nil, nil
+}
+
+func (m *mockMetricsArtifactRepo) List(opts models.CatalogMetricsArtifactListOptions) (*dbmodels.ListWrapper[models.CatalogMetricsArtifact], error) {
+	return m.listResult, nil
+}
+
+func (m *mockMetricsArtifactRepo) Save(artifact models.CatalogMetricsArtifact, parentID *int32) (models.CatalogMetricsArtifact, error) {
+	return artifact, nil
+}
+
+func (m *mockMetricsArtifactRepo) BatchSave(artifacts []models.CatalogMetricsArtifact, parentID *int32) ([]models.CatalogMetricsArtifact, error) {
+	if m.batchSaveFunc != nil {
+		return m.batchSaveFunc(artifacts, parentID)
+	}
+	return artifacts, nil
+}
+
 // cacheKeys returns all keys from a map for diagnostic output.
 func cacheKeys(m map[string]string) []string {
 	keys := make([]string, 0, len(m))
@@ -1395,4 +1977,456 @@ func generateLongString(length int) string {
 		result.WriteString(char)
 	}
 	return result.String()
+}
+
+func TestSecurityEvaluationRecordUnmarshalJSON(t *testing.T) {
+	tests := []struct {
+		name             string
+		jsonData         string
+		wantID           string
+		wantModelID      string
+		wantCustomProps  map[string]any
+		wantErr          bool
+		checkCustomProps bool
+	}{
+		{
+			name: "complete security evaluation record",
+			jsonData: `{
+				"id": "sec-eval-123",
+				"model_id": "test-model-456",
+				"cve_score": 7.5,
+				"created_at": 1609459200,
+				"updated_at": 1609545600
+			}`,
+			wantID:      "sec-eval-123",
+			wantModelID: "test-model-456",
+			wantCustomProps: map[string]any{
+				"id":         "sec-eval-123",
+				"model_id":   "test-model-456",
+				"cve_score":  7.5,
+				"created_at": float64(1609459200),
+				"updated_at": float64(1609545600),
+			},
+			wantErr:          false,
+			checkCustomProps: true,
+		},
+		{
+			name: "minimal security record with only core fields",
+			jsonData: `{
+				"id": "minimal-sec",
+				"model_id": "minimal-model"
+			}`,
+			wantID:      "minimal-sec",
+			wantModelID: "minimal-model",
+			wantCustomProps: map[string]any{
+				"id":       "minimal-sec",
+				"model_id": "minimal-model",
+			},
+			wantErr:          false,
+			checkCustomProps: true,
+		},
+		{
+			name: "security record with custom properties",
+			jsonData: `{
+				"id": "custom-sec",
+				"model_id": "custom-model",
+				"risk_level": "high",
+				"exploitability": 8.5,
+				"patched": true
+			}`,
+			wantID:      "custom-sec",
+			wantModelID: "custom-model",
+			wantCustomProps: map[string]any{
+				"id":             "custom-sec",
+				"model_id":       "custom-model",
+				"risk_level":     "high",
+				"exploitability": 8.5,
+				"patched":        true,
+			},
+			wantErr:          false,
+			checkCustomProps: true,
+		},
+		{
+			name: "security record with null values",
+			jsonData: `{
+				"id": "null-sec",
+				"model_id": "null-model",
+				"null_field": null,
+				"score": 5.0
+			}`,
+			wantID:      "null-sec",
+			wantModelID: "null-model",
+			wantCustomProps: map[string]any{
+				"id":         "null-sec",
+				"model_id":   "null-model",
+				"null_field": nil,
+				"score":      5.0,
+			},
+			wantErr:          false,
+			checkCustomProps: true,
+		},
+		{
+			name: "security record missing core fields",
+			jsonData: `{
+				"cve_score": 9.8,
+				"severity": "critical"
+			}`,
+			wantID:           "",
+			wantModelID:      "",
+			wantErr:          false,
+			checkCustomProps: false,
+		},
+		{
+			name: "security record with wrong type for core fields",
+			jsonData: `{
+				"id": 123,
+				"model_id": 456,
+				"score": 7.0
+			}`,
+			wantID:           "",
+			wantModelID:      "",
+			wantErr:          false,
+			checkCustomProps: false,
+		},
+		{
+			name:             "empty JSON object",
+			jsonData:         `{}`,
+			wantID:           "",
+			wantModelID:      "",
+			wantErr:          false,
+			checkCustomProps: false,
+		},
+		{
+			name:             "invalid JSON",
+			jsonData:         `{"id": "invalid", "model_id":}`,
+			wantErr:          true,
+			checkCustomProps: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var sr securityEvaluationRecord
+			err := sr.UnmarshalJSON([]byte(tt.jsonData))
+
+			if (err != nil) != tt.wantErr {
+				t.Errorf("securityEvaluationRecord.UnmarshalJSON() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+
+			if err != nil {
+				return
+			}
+
+			if sr.ID != tt.wantID {
+				t.Errorf("ID = %v, want %v", sr.ID, tt.wantID)
+			}
+			if sr.ModelID != tt.wantModelID {
+				t.Errorf("ModelID = %v, want %v", sr.ModelID, tt.wantModelID)
+			}
+
+			if sr.CustomProperties == nil {
+				t.Error("CustomProperties should not be nil")
+			}
+
+			if tt.checkCustomProps {
+				if len(sr.CustomProperties) != len(tt.wantCustomProps) {
+					t.Errorf("CustomProperties length = %v, want %v", len(sr.CustomProperties), len(tt.wantCustomProps))
+				}
+				for key, wantValue := range tt.wantCustomProps {
+					gotValue, exists := sr.CustomProperties[key]
+					if !exists {
+						t.Errorf("CustomProperties missing key %v", key)
+						continue
+					}
+
+					if jsonNumber, ok := gotValue.(json.Number); ok {
+						var newValue any
+						var convErr error
+						switch wantValue.(type) {
+						case float64:
+							newValue, convErr = jsonNumber.Float64()
+						case int, int32, int64:
+							newValue, convErr = jsonNumber.Int64()
+						}
+						if convErr == nil {
+							gotValue = newValue
+						}
+					}
+
+					if gotValue != wantValue {
+						t.Errorf("CustomProperties[%v] = %v (type %T), want %v (type %T)",
+							key, gotValue, gotValue, wantValue, wantValue)
+					}
+				}
+			}
+		})
+	}
+}
+
+func TestSecurityEvaluationRecordUnmarshalJSON_CoreFieldsInCustomProperties(t *testing.T) {
+	jsonData := `{
+		"id": "sec-id",
+		"model_id": "test-model",
+		"cve_score": 8.5
+	}`
+
+	var sr securityEvaluationRecord
+	err := sr.UnmarshalJSON([]byte(jsonData))
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+
+	if sr.CustomProperties["id"] != "sec-id" {
+		t.Errorf("CustomProperties[id] = %v, want %v", sr.CustomProperties["id"], "sec-id")
+	}
+	if sr.CustomProperties["model_id"] != "test-model" {
+		t.Errorf("CustomProperties[model_id] = %v, want %v", sr.CustomProperties["model_id"], "test-model")
+	}
+	if v, _ := sr.CustomProperties["cve_score"].(json.Number).Float64(); v != 8.5 {
+		t.Errorf("CustomProperties[cve_score] = %v, want 8.5", sr.CustomProperties["cve_score"])
+	}
+}
+
+func TestCreateSecurityArtifact(t *testing.T) {
+	t.Run("artifact name uses security- prefix with record ID", func(t *testing.T) {
+		secRecord := securityEvaluationRecord{
+			ID:      "sec-eval-abc123",
+			ModelID: "test-model",
+			CustomProperties: map[string]any{
+				"id":       "sec-eval-abc123",
+				"model_id": "test-model",
+			},
+		}
+
+		artifact := createSecurityArtifact(secRecord, 1, 100, nil, nil)
+
+		if artifact.Attributes == nil {
+			t.Fatal("Attributes should not be nil")
+		}
+		if artifact.Attributes.Name == nil || *artifact.Attributes.Name != "security-sec-eval-abc123" {
+			t.Errorf("Name = %v, want security-sec-eval-abc123", artifact.Attributes.Name)
+		}
+	})
+
+	t.Run("external ID is the record ID", func(t *testing.T) {
+		secRecord := securityEvaluationRecord{
+			ID:               "sec-eval-xyz789",
+			CustomProperties: map[string]any{"id": "sec-eval-xyz789"},
+		}
+
+		artifact := createSecurityArtifact(secRecord, 1, 100, nil, nil)
+
+		if artifact.Attributes.ExternalID == nil || *artifact.Attributes.ExternalID != "sec-eval-xyz789" {
+			t.Errorf("ExternalID = %v, want sec-eval-xyz789", artifact.Attributes.ExternalID)
+		}
+	})
+
+	t.Run("metrics type is security-metrics", func(t *testing.T) {
+		secRecord := securityEvaluationRecord{
+			ID:               "sec-eval-001",
+			CustomProperties: map[string]any{"id": "sec-eval-001"},
+		}
+
+		artifact := createSecurityArtifact(secRecord, 1, 100, nil, nil)
+
+		if artifact.Attributes.MetricsType != "security-metrics" {
+			t.Errorf("MetricsType = %v, want security-metrics", artifact.Attributes.MetricsType)
+		}
+	})
+
+	t.Run("custom properties are mapped correctly", func(t *testing.T) {
+		strVal := "high"
+		floatVal := 9.1
+		boolVal := true
+		secRecord := securityEvaluationRecord{
+			ID:      "sec-eval-props",
+			ModelID: "test-model",
+			CustomProperties: map[string]any{
+				"id":           "sec-eval-props",
+				"risk_level":   strVal,
+				"cvss_score":   json.Number("9.1"),
+				"is_exploited": boolVal,
+			},
+		}
+
+		artifact := createSecurityArtifact(secRecord, 1, 100, nil, nil)
+
+		propMap := map[string]any{}
+		for _, p := range *artifact.CustomProperties {
+			if p.StringValue != nil {
+				propMap[p.Name] = *p.StringValue
+			} else if p.DoubleValue != nil {
+				propMap[p.Name] = *p.DoubleValue
+			} else if p.BoolValue != nil {
+				propMap[p.Name] = *p.BoolValue
+			}
+		}
+
+		if propMap["risk_level"] != strVal {
+			t.Errorf("risk_level = %v, want %v", propMap["risk_level"], strVal)
+		}
+		if propMap["cvss_score"] != floatVal {
+			t.Errorf("cvss_score = %v, want %v", propMap["cvss_score"], floatVal)
+		}
+		if propMap["is_exploited"] != boolVal {
+			t.Errorf("is_exploited = %v, want %v", propMap["is_exploited"], boolVal)
+		}
+	})
+
+	t.Run("created_at and updated_at are removed from custom properties", func(t *testing.T) {
+		createdAt := int64(1609459200000)
+		secRecord := securityEvaluationRecord{
+			ID: "sec-eval-timestamps",
+			CustomProperties: map[string]any{
+				"id":         "sec-eval-timestamps",
+				"created_at": json.Number("1609459200000"),
+				"updated_at": json.Number("1609545600000"),
+				"score":      json.Number("7.5"),
+			},
+		}
+
+		artifact := createSecurityArtifact(secRecord, 1, 100, nil, nil)
+
+		for _, p := range *artifact.CustomProperties {
+			if p.Name == "created_at" || p.Name == "updated_at" {
+				t.Errorf("unexpected property %q in custom properties", p.Name)
+			}
+		}
+
+		if artifact.Attributes.CreateTimeSinceEpoch == nil || *artifact.Attributes.CreateTimeSinceEpoch != createdAt {
+			t.Errorf("CreateTimeSinceEpoch = %v, want %v", artifact.Attributes.CreateTimeSinceEpoch, createdAt)
+		}
+	})
+}
+
+func TestParseSecurityEvaluationFile(t *testing.T) {
+	t.Run("valid multi-record NDJSON", func(t *testing.T) {
+		f := writeTempNDJSON(t, []string{
+			`{"id":"id-1","model_id":"m1","result":0.1,"pass":true}`,
+			`{"id":"id-2","model_id":"m1","result":0.2,"pass":false}`,
+		})
+
+		records, err := parseSecurityEvaluationFile(f)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(records) != 2 {
+			t.Fatalf("expected 2 records, got %d", len(records))
+		}
+		if records[0].ID != "id-1" || records[1].ID != "id-2" {
+			t.Errorf("unexpected record IDs: %v, %v", records[0].ID, records[1].ID)
+		}
+	})
+
+	t.Run("blank lines are skipped", func(t *testing.T) {
+		f := writeTempNDJSON(t, []string{
+			`{"id":"id-1","model_id":"m1"}`,
+			``,
+			`   `,
+			`{"id":"id-2","model_id":"m1"}`,
+		})
+
+		records, err := parseSecurityEvaluationFile(f)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(records) != 2 {
+			t.Errorf("expected 2 records after skipping blank lines, got %d", len(records))
+		}
+	})
+
+	t.Run("malformed record is skipped, valid records returned", func(t *testing.T) {
+		f := writeTempNDJSON(t, []string{
+			`{"id":"id-1","model_id":"m1"}`,
+			`{not valid json`,
+			`{"id":"id-2","model_id":"m1"}`,
+		})
+
+		records, err := parseSecurityEvaluationFile(f)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(records) != 2 {
+			t.Errorf("expected 2 records after skipping malformed line, got %d", len(records))
+		}
+	})
+
+	t.Run("empty file returns zero records without error", func(t *testing.T) {
+		f := writeTempNDJSON(t, []string{})
+
+		records, err := parseSecurityEvaluationFile(f)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(records) != 0 {
+			t.Errorf("expected 0 records, got %d", len(records))
+		}
+	})
+
+	t.Run("nonexistent file returns error", func(t *testing.T) {
+		_, err := parseSecurityEvaluationFile("/nonexistent/path/security-evaluations.ndjson")
+		if err == nil {
+			t.Error("expected error for nonexistent file, got nil")
+		}
+	})
+}
+
+// writeTempNDJSON writes lines to a temp file and returns its path.
+func writeTempNDJSON(t *testing.T, lines []string) string {
+	t.Helper()
+	f, err := os.CreateTemp(t.TempDir(), "*.ndjson")
+	if err != nil {
+		t.Fatalf("failed to create temp file: %v", err)
+	}
+	for _, line := range lines {
+		if _, err := f.WriteString(line + "\n"); err != nil {
+			t.Fatalf("failed to write line: %v", err)
+		}
+	}
+	f.Close()
+	return f.Name()
+}
+
+func TestSecurityDuplicateIDDeduplication(t *testing.T) {
+	t.Run("duplicate IDs in NDJSON file produce only one artifact on first sync", func(t *testing.T) {
+		// Two records sharing the same id — only the first should be inserted.
+		records := []securityEvaluationRecord{
+			{ID: "dup-id", ModelID: "m1", CustomProperties: map[string]any{"id": "dup-id", "result": json.Number("0.1")}},
+			{ID: "dup-id", ModelID: "m1", CustomProperties: map[string]any{"id": "dup-id", "result": json.Number("0.9")}},
+			{ID: "unique-id", ModelID: "m1", CustomProperties: map[string]any{"id": "unique-id", "result": json.Number("0.5")}},
+		}
+
+		// Simulate the deduplication logic from processModelArtifactsBatch with an empty existingArtifactsMap.
+		existingArtifactsMap := map[string]bool{}
+		artifactsToInsert := []*models.CatalogMetricsArtifactImpl{}
+		seenSecurityIDs := make(map[string]bool, len(records))
+		for _, secRecord := range records {
+			if seenSecurityIDs[secRecord.ID] {
+				continue
+			}
+			seenSecurityIDs[secRecord.ID] = true
+			if !existingArtifactsMap[secRecord.ID] {
+				artifact := createSecurityArtifact(secRecord, 1, 100, nil, nil)
+				artifactsToInsert = append(artifactsToInsert, artifact)
+			}
+		}
+
+		if len(artifactsToInsert) != 2 {
+			t.Errorf("expected 2 artifacts (dup-id deduplicated, unique-id kept), got %d", len(artifactsToInsert))
+		}
+
+		ids := map[string]int{}
+		for _, a := range artifactsToInsert {
+			if a.Attributes != nil && a.Attributes.ExternalID != nil {
+				ids[*a.Attributes.ExternalID]++
+			}
+		}
+		if ids["dup-id"] != 1 {
+			t.Errorf("expected dup-id to appear exactly once, got %d", ids["dup-id"])
+		}
+		if ids["unique-id"] != 1 {
+			t.Errorf("expected unique-id to appear exactly once, got %d", ids["unique-id"])
+		}
+	})
 }

@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"strings"
 	"testing"
 	"time"
@@ -14,6 +13,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/kubeflow/hub/catalog/internal/catalog/basecatalog"
 	catalogmodels "github.com/kubeflow/hub/catalog/internal/catalog/modelcatalog/models"
 	apimodels "github.com/kubeflow/hub/catalog/pkg/openapi"
 	models "github.com/kubeflow/hub/internal/platform/db/entity"
@@ -63,13 +63,13 @@ func TestPopulateFromHFInfo(t *testing.T) {
 			sourceId:          "test-source-id",
 			originalModelName: "test-org/test-model",
 			expectedName:      "test-org/test-model",
-			expectedProvider:  stringPtr("test-author"),
-			expectedLicense:   stringPtr("MIT"),
-			expectedLibrary:   stringPtr("transformers"),
+			expectedProvider:  new("test-author"),
+			expectedLicense:   new("MIT"),
+			expectedLibrary:   new("transformers"),
 			hasTasks:          true,
 			hasCustomProps:    true,
 			hasReadme:         false, // No README fetching in unit tests
-			expectedModelType: stringPtr("generative"),
+			expectedModelType: new("generative"),
 		},
 		{
 			name: "model with ModelID fallback",
@@ -80,8 +80,8 @@ func TestPopulateFromHFInfo(t *testing.T) {
 			sourceId:          "source-2",
 			originalModelName: "original-name",
 			expectedName:      "fallback-model-id",
-			expectedProvider:  stringPtr("another-author"),
-			expectedModelType: stringPtr("unknown"),
+			expectedProvider:  new("another-author"),
+			expectedModelType: new("unknown"),
 		},
 		{
 			name: "model with original name fallback",
@@ -91,8 +91,8 @@ func TestPopulateFromHFInfo(t *testing.T) {
 			sourceId:          "source-3",
 			originalModelName: "fallback-original-name",
 			expectedName:      "fallback-original-name",
-			expectedProvider:  stringPtr("author-3"),
-			expectedModelType: stringPtr("unknown"),
+			expectedProvider:  new("author-3"),
+			expectedModelType: new("unknown"),
 		},
 		{
 			name: "model with license in tags",
@@ -103,9 +103,9 @@ func TestPopulateFromHFInfo(t *testing.T) {
 			sourceId:          "source-4",
 			originalModelName: "test/licensed-model",
 			expectedName:      "test/licensed-model",
-			expectedLicense:   stringPtr("Apache 2.0"),
+			expectedLicense:   new("Apache 2.0"),
 			hasCustomProps:    true,
-			expectedModelType: stringPtr("unknown"),
+			expectedModelType: new("unknown"),
 		},
 		{
 			name: "model with tasks",
@@ -119,7 +119,7 @@ func TestPopulateFromHFInfo(t *testing.T) {
 			expectedName:      "test/task-model",
 			hasTasks:          true,
 			hasCustomProps:    true,
-			expectedModelType: stringPtr("predictive"),
+			expectedModelType: new("predictive"),
 		},
 		{
 			name: "model with description in cardData",
@@ -135,7 +135,7 @@ func TestPopulateFromHFInfo(t *testing.T) {
 			originalModelName: "test/desc-model",
 			expectedName:      "test/desc-model",
 			hasDescription:    true,
-			expectedModelType: stringPtr("unknown"),
+			expectedModelType: new("unknown"),
 		},
 		{
 			name: "minimal model info",
@@ -146,7 +146,7 @@ func TestPopulateFromHFInfo(t *testing.T) {
 			originalModelName: "minimal/model",
 			expectedName:      "minimal/model",
 			hasCustomProps:    true,
-			expectedModelType: stringPtr("unknown"),
+			expectedModelType: new("unknown"),
 		},
 		{
 			name: "model with generative task - should classify as generative",
@@ -160,7 +160,7 @@ func TestPopulateFromHFInfo(t *testing.T) {
 			expectedName:      "test/generative-model",
 			hasTasks:          true,
 			hasCustomProps:    true,
-			expectedModelType: stringPtr("generative"),
+			expectedModelType: new("generative"),
 		},
 		{
 			name: "model with predictive task - should classify as predictive",
@@ -174,7 +174,7 @@ func TestPopulateFromHFInfo(t *testing.T) {
 			expectedName:      "test/predictive-model",
 			hasTasks:          true,
 			hasCustomProps:    true,
-			expectedModelType: stringPtr("predictive"),
+			expectedModelType: new("predictive"),
 		},
 		{
 			name: "model with both generative and predictive tasks - should prioritize generative",
@@ -188,7 +188,7 @@ func TestPopulateFromHFInfo(t *testing.T) {
 			expectedName:      "test/mixed-model",
 			hasTasks:          true,
 			hasCustomProps:    true,
-			expectedModelType: stringPtr("generative"),
+			expectedModelType: new("generative"),
 		},
 		{
 			name: "model with unknown task - should classify as unknown",
@@ -202,7 +202,7 @@ func TestPopulateFromHFInfo(t *testing.T) {
 			expectedName:      "test/unknown-model",
 			hasTasks:          true,
 			hasCustomProps:    true,
-			expectedModelType: stringPtr("unknown"),
+			expectedModelType: new("unknown"),
 		},
 	}
 
@@ -433,12 +433,12 @@ func TestConvertHFModelProperties(t *testing.T) {
 			name: "model with all properties",
 			catalogModel: &apimodels.CatalogModel{
 				Name:        "test-model",
-				Description: stringPtr("Test description"),
-				Readme:      stringPtr("# Test README"),
-				Provider:    stringPtr("test-provider"),
-				License:     stringPtr("MIT License"),
-				LibraryName: stringPtr("transformers"),
-				SourceId:    stringPtr("source-1"),
+				Description: new("Test description"),
+				Readme:      new("# Test README"),
+				Provider:    new("test-provider"),
+				License:     new("MIT License"),
+				LibraryName: new("transformers"),
+				SourceId:    new("source-1"),
 				Tasks:       []string{"text-generation"},
 			},
 			wantProps:  true,
@@ -656,11 +656,6 @@ func TestPopulateFromHFInfoWithCustomProperties(t *testing.T) {
 	}
 }
 
-// Helper function to create string pointers
-func stringPtr(s string) *string {
-	return &s
-}
-
 func TestParseModelPattern(t *testing.T) {
 	tests := []struct {
 		pattern      string
@@ -800,21 +795,19 @@ func TestListModelsByAuthor(t *testing.T) {
 	server := httptest.NewServer(mux)
 	defer server.Close()
 
-	os.Setenv("HF_API_KEY", "test-api-key")
-	defer os.Unsetenv("HF_API_KEY")
+	t.Setenv("HF_API_KEY", "test-api-key")
 
 	t.Run("lists all models from org with pagination", func(t *testing.T) {
 		callCount = 0
 		config := &PreviewConfig{
-			Type: "hf",
-			Properties: map[string]any{
-				"url": server.URL,
-			},
+			Type:           "hf",
+			Properties:     map[string]any{},
 			IncludedModels: []string{"test-org/*"},
 		}
 
 		provider, err := NewHFPreviewProvider(config)
 		require.NoError(t, err)
+		provider.baseURL = server.URL
 
 		models, err := provider.listModelsByAuthor(context.Background(), "test-org", "")
 		require.NoError(t, err)
@@ -832,15 +825,14 @@ func TestListModelsByAuthor(t *testing.T) {
 
 	t.Run("filters by search prefix", func(t *testing.T) {
 		config := &PreviewConfig{
-			Type: "hf",
-			Properties: map[string]any{
-				"url": server.URL,
-			},
+			Type:           "hf",
+			Properties:     map[string]any{},
 			IncludedModels: []string{"test-org/*"},
 		}
 
 		provider, err := NewHFPreviewProvider(config)
 		require.NoError(t, err)
+		provider.baseURL = server.URL
 
 		models, err := provider.listModelsByAuthor(context.Background(), "search-org", "prefix")
 		require.NoError(t, err)
@@ -858,7 +850,6 @@ func TestListModelsByAuthor(t *testing.T) {
 		config := &PreviewConfig{
 			Type: "hf",
 			Properties: map[string]any{
-				"url":       server.URL,
 				"maxModels": 50, // Limit to 50 models
 			},
 			IncludedModels: []string{"test-org/*"},
@@ -866,6 +857,7 @@ func TestListModelsByAuthor(t *testing.T) {
 
 		provider, err := NewHFPreviewProvider(config)
 		require.NoError(t, err)
+		provider.baseURL = server.URL
 		assert.Equal(t, 50, provider.maxModels)
 
 		models, err := provider.listModelsByAuthor(context.Background(), "test-org", "")
@@ -880,10 +872,8 @@ func TestListModelsByAuthor(t *testing.T) {
 
 	t.Run("uses default maxModels when not specified", func(t *testing.T) {
 		config := &PreviewConfig{
-			Type: "hf",
-			Properties: map[string]any{
-				"url": server.URL,
-			},
+			Type:           "hf",
+			Properties:     map[string]any{},
 			IncludedModels: []string{"test-org/*"},
 		}
 
@@ -899,7 +889,6 @@ func TestListModelsByAuthor(t *testing.T) {
 		config := &PreviewConfig{
 			Type: "hf",
 			Properties: map[string]any{
-				"url":       server.URL,
 				"maxModels": 0, // No limit
 			},
 			IncludedModels: []string{"test-org/*"},
@@ -907,6 +896,7 @@ func TestListModelsByAuthor(t *testing.T) {
 
 		provider, err := NewHFPreviewProvider(config)
 		require.NoError(t, err)
+		provider.baseURL = server.URL
 		assert.Equal(t, 0, provider.maxModels)
 
 		models, err := provider.listModelsByAuthor(context.Background(), "test-org", "")
@@ -951,8 +941,7 @@ func TestFetchModelNamesForPreviewWithPatterns(t *testing.T) {
 	server := httptest.NewServer(mux)
 	defer server.Close()
 
-	os.Setenv("HF_API_KEY", "test-api-key")
-	defer os.Unsetenv("HF_API_KEY")
+	t.Setenv("HF_API_KEY", "test-api-key")
 
 	t.Run("mixed patterns: org/* and exact", func(t *testing.T) {
 		config := &PreviewConfig{
@@ -961,13 +950,12 @@ func TestFetchModelNamesForPreviewWithPatterns(t *testing.T) {
 				"test-org/*",            // Should use list API
 				"exact-org/exact-model", // Should use direct fetch
 			},
-			Properties: map[string]any{
-				"url": server.URL,
-			},
+			Properties: map[string]any{},
 		}
 
 		provider, err := NewHFPreviewProvider(config)
 		require.NoError(t, err)
+		provider.baseURL = server.URL
 
 		names, err := provider.FetchModelNamesForPreview(context.Background(), config.IncludedModels)
 		require.NoError(t, err)
@@ -984,13 +972,12 @@ func TestFetchModelNamesForPreviewWithPatterns(t *testing.T) {
 			IncludedModels: []string{
 				"*",
 			},
-			Properties: map[string]any{
-				"url": server.URL,
-			},
+			Properties: map[string]any{},
 		}
 
 		provider, err := NewHFPreviewProvider(config)
 		require.NoError(t, err)
+		provider.baseURL = server.URL
 
 		_, err = provider.FetchModelNamesForPreview(context.Background(), config.IncludedModels)
 		require.Error(t, err)
@@ -1004,13 +991,12 @@ func TestFetchModelNamesForPreviewWithPatterns(t *testing.T) {
 			IncludedModels: []string{
 				"*/*",
 			},
-			Properties: map[string]any{
-				"url": server.URL,
-			},
+			Properties: map[string]any{},
 		}
 
 		provider, err := NewHFPreviewProvider(config)
 		require.NoError(t, err)
+		provider.baseURL = server.URL
 
 		_, err = provider.FetchModelNamesForPreview(context.Background(), config.IncludedModels)
 		require.Error(t, err)
@@ -1024,13 +1010,12 @@ func TestFetchModelNamesForPreviewWithPatterns(t *testing.T) {
 			IncludedModels: []string{
 				"*/Llama-*",
 			},
-			Properties: map[string]any{
-				"url": server.URL,
-			},
+			Properties: map[string]any{},
 		}
 
 		provider, err := NewHFPreviewProvider(config)
 		require.NoError(t, err)
+		provider.baseURL = server.URL
 
 		_, err = provider.FetchModelNamesForPreview(context.Background(), config.IncludedModels)
 		require.Error(t, err)
@@ -1065,8 +1050,7 @@ func TestPreviewSourceModelsWithHFPatterns(t *testing.T) {
 	server := httptest.NewServer(mux)
 	defer server.Close()
 
-	os.Setenv("HF_API_KEY", "test-api-key")
-	defer os.Unsetenv("HF_API_KEY")
+	t.Setenv("HF_API_KEY", "test-api-key")
 
 	t.Run("org/* pattern with excludedModels filter", func(t *testing.T) {
 		// Note: We test the filtering logic by calling NewHFPreviewProvider directly
@@ -1080,14 +1064,12 @@ func TestPreviewSourceModelsWithHFPatterns(t *testing.T) {
 			Type:           "hf",
 			IncludedModels: includedModels,
 			ExcludedModels: excludedModels,
-			Properties: map[string]any{
-				"url": server.URL,
-			},
+			Properties:     map[string]any{},
 		}
 
-		// Create provider and fetch model names (bypassing SSRF protection for testing)
 		provider, err := NewHFPreviewProvider(config)
 		require.NoError(t, err)
+		provider.baseURL = server.URL
 
 		modelNames, err := provider.FetchModelNamesForPreview(context.Background(), includedModels)
 		require.NoError(t, err)
@@ -1664,4 +1646,127 @@ func TestClassifyModelTypeFromTasks(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestNewHFPreviewProvider_RejectsCustomURL(t *testing.T) {
+	t.Setenv("HF_API_KEY", "hf_test123")
+
+	config := &PreviewConfig{
+		Type: "hf",
+		Properties: map[string]any{
+			"url": "http://attacker.example.com",
+		},
+		IncludedModels: []string{"test-org/model-1"},
+	}
+
+	provider, err := NewHFPreviewProvider(config)
+	require.NoError(t, err)
+	assert.Equal(t, defaultHuggingFaceURL, provider.baseURL)
+
+	_, exists := config.Properties["url"]
+	assert.False(t, exists, "url property should be deleted from config")
+}
+
+func TestNewHFPreviewProvider_IgnoresCustomApiKeyEnvVar(t *testing.T) {
+	t.Setenv("HF_API_KEY", "hf_real_key")
+	t.Setenv("PGPASSWORD", "db_secret")
+
+	config := &PreviewConfig{
+		Type: "hf",
+		Properties: map[string]any{
+			"apiKeyEnvVar": "PGPASSWORD",
+		},
+		IncludedModels: []string{"test-org/model-1"},
+	}
+
+	provider, err := NewHFPreviewProvider(config)
+	require.NoError(t, err)
+	assert.Equal(t, "hf_real_key", provider.apiKey, "should use HF_API_KEY, not the custom env var")
+}
+
+func TestNewHFPreviewProvider_AcceptsHFAPIKeyPrefixedEnvVar(t *testing.T) {
+	t.Setenv("HF_API_KEY_ORG1", "hf_org1_val")
+	t.Setenv("HF_API_KEY", "hf_default_val")
+
+	config := &PreviewConfig{
+		Type: "hf",
+		Properties: map[string]any{
+			"apiKeyEnvVar": "HF_API_KEY_ORG1",
+		},
+		IncludedModels: []string{"test-org/model-1"},
+	}
+
+	provider, err := NewHFPreviewProvider(config)
+	require.NoError(t, err)
+	assert.Equal(t, "hf_org1_val", provider.apiKey, "should use HF_API_KEY_ORG1 when specified with valid prefix")
+}
+
+func TestNewHFPreviewProvider_RejectsNonPrefixedHFEnvVar(t *testing.T) {
+	t.Setenv("HF_CUSTOM_KEY", "hf_custom_val")
+	t.Setenv("HF_API_KEY", "hf_default_val")
+
+	config := &PreviewConfig{
+		Type: "hf",
+		Properties: map[string]any{
+			"apiKeyEnvVar": "HF_CUSTOM_KEY",
+		},
+		IncludedModels: []string{"test-org/model-1"},
+	}
+
+	provider, err := NewHFPreviewProvider(config)
+	require.NoError(t, err)
+	assert.Equal(t, "hf_default_val", provider.apiKey,
+		"should fall back to HF_API_KEY when apiKeyEnvVar does not match HF_API_KEY or HF_API_KEY_*")
+}
+
+func TestNewHFPreviewProvider_AcceptsExactHFAPIKey(t *testing.T) {
+	t.Setenv("HF_API_KEY", "hf_exact_val")
+
+	config := &PreviewConfig{
+		Type: "hf",
+		Properties: map[string]any{
+			"apiKeyEnvVar": "HF_API_KEY",
+		},
+		IncludedModels: []string{"test-org/model-1"},
+	}
+
+	provider, err := NewHFPreviewProvider(config)
+	require.NoError(t, err)
+	assert.Equal(t, "hf_exact_val", provider.apiKey,
+		"should accept explicit HF_API_KEY as apiKeyEnvVar")
+}
+
+// TestNewHFModelProvider_SanitizesSecurityProperties verifies that the full catalog code path
+// (newHFModelProvider) removes forbidden properties before use, matching the preview path.
+// sanitizeHFProperties is called before p.Models(), so the assertions hold even if Models()
+// returns an error (e.g. network failure reaching huggingface.co in a test environment).
+func TestNewHFModelProvider_SanitizesSecurityProperties(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	source := &basecatalog.ModelSource{
+		CatalogSource: apimodels.CatalogSource{
+			Id:             "test-source",
+			IncludedModels: []string{"test-org/test-model"},
+		},
+		Properties: map[string]any{
+			"url":          "http://attacker.example.com",
+			"apiKeyEnvVar": "PGPASSWORD",
+		},
+	}
+
+	ch, _ := newHFModelProvider(ctx, source, "") // ignore error: network may fail in test env
+	cancel()
+	if ch != nil {
+		go func() { //nolint:revive
+			for range ch {
+			}
+		}()
+	}
+
+	_, urlExists := source.Properties[urlKey]
+	assert.False(t, urlExists, "url property must be removed to prevent SSRF")
+
+	_, envVarExists := source.Properties[apiKeyEnvVarKey]
+	assert.False(t, envVarExists, "apiKeyEnvVar property must be removed to prevent env var oracle")
 }

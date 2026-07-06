@@ -29,8 +29,8 @@ These instructions can be followed by the Maintainers with write access on the r
 Assuming the following remotes are setup locally:
 
 ```
-origin	git@github.com:<your username>/model-registry.git (fetch)
-origin	git@github.com:<your username>/model-registry.git (push)
+origin	git@github.com:<your username>/hub.git (fetch)
+origin	git@github.com:<your username>/hub.git (push)
 upstream	git@github.com:kubeflow/hub.git (fetch)
 upstream	git@github.com:kubeflow/hub.git (push)
 ```
@@ -73,6 +73,9 @@ pushd manifests/kustomize/base && kustomize edit set image ghcr.io/kubeflow/hub/
 pushd manifests/kustomize/options/csi && kustomize edit set image ghcr.io/kubeflow/hub/storage-initializer=ghcr.io/kubeflow/hub/storage-initializer:$VVERSION && popd
 pushd manifests/kustomize/options/ui/base && kustomize edit set image model-registry-ui=ghcr.io/kubeflow/hub/ui:$VVERSION && popd
 pushd manifests/kustomize/options/catalog/base && kustomize edit set image ghcr.io/kubeflow/hub/server=ghcr.io/kubeflow/hub/server:$VVERSION && popd
+VERSION=$(echo $VVERSION | cut -b 2-)
+sed -i "s/^\(version = \"\)[^\"]*\"/\1$VERSION\"/" clients/python/pyproject.toml
+sed -i "s/^\(__version__ = \"\)[^\"]*\"/\1$VERSION\"/" clients/python/src/model_registry/__init__.py
 git add .
 git commit -s
 
@@ -83,6 +86,8 @@ git commit -s
 # eg: git push --set-upstream origin mr_maintainer-20241108-upstreamSync
 git push --set-upstream origin mr_maintainer-$TDATE-upstreamSync
 ```
+
+**Note:** On mac, replace the `sed -i` in the above command with `sed -i ''`.
 
 - create PR ⚠️ targeting the _release branch_ ⚠️ specifically (title ~like: `chore: align manifest for 0.2.10`)
 - merge the PR (you can manually add the approved, lgtm labels)
@@ -116,17 +121,26 @@ git tag pkg/openapi/$VVERSION
 git push upstream pkg/openapi/$VVERSION
 ```
 
+- add a Tag for the pkg/inferenceservice-controller
+
+```
+git checkout release/$VVERSION
+git pull upstream release/$VVERSION
+git tag pkg/inferenceservice-controller/$VVERSION
+git push upstream pkg/inferenceservice-controller/$VVERSION
+```
+
 At this point, a release as been created, both the container images and the Python client on pypi.
 
 ## KF/manifests
 
-The KF/model-registry manifests need to be sync'd to KF/manifests repository using the Manifest/Platform WG provided script (in the KF/manifests repo).
+The KF/hub manifests need to be sync'd to KF/manifests repository using the Manifest/Platform WG provided script (in the KF/manifests repo).
 
 Example PR:
 - https://github.com/kubeflow/manifests/pull/3053
 
 It is supposed to work by leveraging sync script in KF/manifests repo:
-- https://github.com/kubeflow/manifests/blob/13a72b79e6f107118bfaeeba2bb26fc21e9244b6/scripts/synchronize-model-registry-manifests.sh#L18
+- https://github.com/pboyd/kubeflow-manifests/blob/163b45fcb55bdcbafa33a843a856a6bd96c5cecd/scripts/synchronize-hub-manifests.sh
 
 ## KF/website
 
@@ -135,7 +149,7 @@ Update latest MR release version number in the KF/website repo.
 Example PR:
 - https://github.com/kubeflow/website/pull/4046
 
-Please notice the OpenAPI spec in the Reference section is automatically updated, since it is sourced from the repo: https://github.com/kubeflow/website/blob/23d50fea25adbb4883ab21ca64d19db9100390bf/content/en/docs/components/model-registry/reference/rest-api.md#L44-L47
+Please notice the OpenAPI spec in the Reference section is automatically updated, since it is sourced from the repo: https://github.com/kubeflow/website/blob/b97081e8e19a06430268e1fa9a38808f2a04cf69/content/en/docs/components/hub/reference/rest-api.md?plain=1#L44-L46
 
 ## Anticipate prerequisites
 

@@ -11,8 +11,7 @@ import {
 import * as React from 'react';
 import { Outlet } from 'react-router-dom';
 import { ModelCatalogContext } from '~/app/context/modelCatalog/ModelCatalogContext';
-import EmptyModelCatalogState from './EmptyModelCatalogState';
-import { hasSourcesWithModels } from './utils/modelCatalogUtils';
+import { EmptyCatalogState, hasSourcesWithModels } from '~/app/shared/components/catalog';
 
 const ModelCatalogCoreLoader: React.FC = () => {
   const { catalogSources, catalogSourcesLoaded, catalogSourcesLoadError } =
@@ -59,7 +58,7 @@ const ModelCatalogCoreLoader: React.FC = () => {
         description="Discover models that are available for your organization to register, deploy, and customize."
         empty
         emptyStatePage={
-          <EmptyModelCatalogState
+          <EmptyCatalogState
             testid="empty-model-catalog-state"
             title={isMUITheme ? 'Deploy a model catalog' : 'Model catalog configuration required'}
             description={

@@ -5,10 +5,10 @@ import {
   mockCatalogSource,
   mockCatalogSourceList,
 } from '~/__mocks__';
-import type { CatalogSource } from '~/app/modelCatalogTypes';
+import type { CatalogSource } from '~/app/shared/types/catalogTypes';
 import { MODEL_CATALOG_API_VERSION } from '~/__tests__/cypress/cypress/support/commands/api';
 import { mockCatalogFilterOptionsList } from '~/__mocks__/mockCatalogFilterOptionsList';
-import { SourceLabel } from '~/app/modelCatalogTypes';
+import { SourceLabel } from '~/app/shared/types/catalogTypes';
 
 type HandlersProps = {
   sources?: CatalogSource[];
@@ -190,14 +190,44 @@ describe('Model Catalog All Models View', () => {
   });
 
   describe('Empty States', () => {
-    it('should show empty state when category has no models', () => {
+    it('should hide empty categories instead of showing empty state', () => {
       initIntercepts({ isEmpty: true });
       modelCatalog.visit();
 
-      modelCatalog.findEmptyState('OpenVINO').scrollIntoView().should('be.visible');
-      modelCatalog
-        .findEmptyState('OpenVINO')
-        .should('contain.text', 'No result foundAdjust your filters and try again.');
+      modelCatalog.findEmptyState('OpenVINO').should('not.exist');
+      modelCatalog.findCategoryTitle('OpenVINO').should('not.exist');
+      modelCatalog.findCategoryTitle('Hugging Face').should('not.exist');
+      modelCatalog.findCategoryTitle('Community').should('not.exist');
+    });
+
+    it('should hide empty categories from toggle', () => {
+      initIntercepts({
+        sources: [
+          mockCatalogSource({
+            id: 'huggingface',
+            name: 'Hugging Face',
+            labels: ['Hugging Face'],
+          }),
+          mockCatalogSource({ id: 'openvino', name: 'OpenVINO', labels: ['OpenVINO'] }),
+          mockCatalogSource({ id: 'community', name: 'Community', labels: ['Community'] }),
+        ],
+        includeSourcesWithoutLabels: false,
+      });
+
+      cy.interceptApi(
+        `GET /api/:apiVersion/model_catalog/models`,
+        {
+          path: { apiVersion: MODEL_CATALOG_API_VERSION },
+          query: { sourceLabel: 'OpenVINO' },
+        },
+        mockCatalogModelList({ items: [] }),
+      );
+
+      modelCatalog.visit();
+
+      modelCatalog.findCategoryToggle('label-Hugging Face').should('be.visible');
+      modelCatalog.findCategoryToggle('label-Community').should('be.visible');
+      modelCatalog.findCategoryToggle('label-OpenVINO').should('not.exist');
     });
   });
 });

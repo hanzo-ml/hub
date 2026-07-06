@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"os"
 	"sort"
 	"strconv"
 	"strings"
@@ -305,7 +306,7 @@ func TestFindModels(t *testing.T) {
 				models: tc.mockModels,
 			}
 
-			service := NewModelCatalogServiceAPIService(provider, sources, nil, sourceLabels, nil)
+			service := NewModelCatalogServiceAPIService(provider, sources, nil, nil, sourceLabels, nil)
 
 			resp, err := service.FindModels(
 				context.Background(),
@@ -750,7 +751,7 @@ func TestFindSources(t *testing.T) {
 			sources := catalog.NewSourceCollection()
 			sources.Merge("", tc.catalogs)
 			sourceLabels := catalog.NewLabelCollection()
-			service := NewModelCatalogServiceAPIService(&mockModelProvider{}, sources, nil, sourceLabels, nil)
+			service := NewModelCatalogServiceAPIService(&mockModelProvider{}, sources, nil, nil, sourceLabels, nil)
 
 			// Call FindSources
 			resp, err := service.FindSources(
@@ -1125,7 +1126,7 @@ func TestFindLabels(t *testing.T) {
 			labelCollection := catalog.NewLabelCollection()
 			labelCollection.Merge("test-source", tc.labels)
 
-			service := NewModelCatalogServiceAPIService(&mockModelProvider{}, sources, nil, labelCollection, nil)
+			service := NewModelCatalogServiceAPIService(&mockModelProvider{}, sources, nil, nil, labelCollection, nil)
 
 			// Call FindLabels
 			resp, err := service.FindLabels(
@@ -1224,8 +1225,9 @@ func TestFindLabels(t *testing.T) {
 
 // Define a mock model provider
 type mockModelProvider struct {
-	models    map[string]*model.CatalogModel
-	artifacts map[string][]model.CatalogArtifact
+	models              map[string]*model.CatalogModel
+	artifacts           map[string][]model.CatalogArtifact
+	lastRecommendedSort string // records sortOrder passed to FindModelsWithRecommendedLatency
 }
 
 // Mock provider that fails when recommended is used (for testing implementation)
@@ -1262,7 +1264,7 @@ func (m *mockProviderThatFailsOnRecommended) GetFilterOptions(ctx context.Contex
 	return m.mockModelProvider.GetFilterOptions(ctx)
 }
 
-func (m *mockProviderThatFailsOnRecommended) FindModelsWithRecommendedLatency(ctx context.Context, pagination mrmodels.Pagination, paretoParams modelcatalog.ParetoFilteringParams, sourceIDs []string, query string) (*model.CatalogModelList, error) {
+func (m *mockProviderThatFailsOnRecommended) FindModelsWithRecommendedLatency(ctx context.Context, pagination mrmodels.Pagination, paretoParams modelcatalog.ParetoFilteringParams, sourceIDs []string, query string, sortOrder string) (*model.CatalogModelList, error) {
 	return nil, fmt.Errorf("recommended sorting not implemented")
 }
 
@@ -1352,7 +1354,8 @@ func (m *mockModelProvider) GetFilterOptions(ctx context.Context) (*model.Filter
 	return &model.FilterOptionsList{Filters: &emptyFilters}, nil
 }
 
-func (m *mockModelProvider) FindModelsWithRecommendedLatency(ctx context.Context, pagination mrmodels.Pagination, paretoParams modelcatalog.ParetoFilteringParams, sourceIDs []string, query string) (*model.CatalogModelList, error) {
+func (m *mockModelProvider) FindModelsWithRecommendedLatency(ctx context.Context, pagination mrmodels.Pagination, paretoParams modelcatalog.ParetoFilteringParams, sourceIDs []string, query string, sortOrder string) (*model.CatalogModelList, error) {
+	m.lastRecommendedSort = sortOrder
 	// Basic mock implementation - just return models sorted by name
 	var allModels []*model.CatalogModel
 	for _, mdl := range m.models {
@@ -1501,7 +1504,7 @@ func TestGetModel(t *testing.T) {
 			sources := catalog.NewSourceCollection()
 			sources.Merge("", tc.sources)
 			sourceLabels := catalog.NewLabelCollection()
-			service := NewModelCatalogServiceAPIService(tc.provider, sources, nil, sourceLabels, nil)
+			service := NewModelCatalogServiceAPIService(tc.provider, sources, nil, nil, sourceLabels, nil)
 
 			// Call GetModel
 			resp, _ := service.GetModel(
@@ -1612,7 +1615,7 @@ func TestGetAllModelArtifacts(t *testing.T) {
 			sources := catalog.NewSourceCollection()
 			sources.Merge("", tc.sources)
 			sourceLabels := catalog.NewLabelCollection()
-			service := NewModelCatalogServiceAPIService(tc.provider, sources, nil, sourceLabels, nil)
+			service := NewModelCatalogServiceAPIService(tc.provider, sources, nil, nil, sourceLabels, nil)
 
 			// Call GetAllModelArtifacts
 			resp, _ := service.GetAllModelArtifacts(
@@ -1671,7 +1674,7 @@ func TestFindModelsFilterOptions(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			sources := catalog.NewSourceCollection()
 			sourceLabels := catalog.NewLabelCollection()
-			service := NewModelCatalogServiceAPIService(tc.provider, sources, nil, sourceLabels, nil)
+			service := NewModelCatalogServiceAPIService(tc.provider, sources, nil, nil, sourceLabels, nil)
 
 			resp, err := service.FindModelsFilterOptions(context.Background())
 
@@ -1831,7 +1834,7 @@ func TestGetAllModelPerformanceArtifacts(t *testing.T) {
 			})
 			sourceLabels := catalog.NewLabelCollection()
 
-			service := NewModelCatalogServiceAPIService(tc.provider, sources, nil, sourceLabels, nil)
+			service := NewModelCatalogServiceAPIService(tc.provider, sources, nil, nil, sourceLabels, nil)
 
 			resp, err := service.GetAllModelPerformanceArtifacts(
 				context.Background(),
@@ -1904,7 +1907,7 @@ func TestFindModelsRecommended(t *testing.T) {
 		},
 	}
 
-	service := NewModelCatalogServiceAPIService(provider, sources, nil, sourceLabels, nil)
+	service := NewModelCatalogServiceAPIService(provider, sources, nil, nil, sourceLabels, nil)
 
 	// Test recommended=true with default parameters
 	resp, err := service.FindModels(
@@ -1953,7 +1956,7 @@ func TestFindModelsRecommendedWithCustomParams(t *testing.T) {
 		},
 	}
 
-	service := NewModelCatalogServiceAPIService(provider, sources, nil, sourceLabels, nil)
+	service := NewModelCatalogServiceAPIService(provider, sources, nil, nil, sourceLabels, nil)
 
 	// Test with custom latency property and targetRPS
 	resp, err := service.FindModels(
@@ -2002,7 +2005,7 @@ func TestFindModelsRecommendedIgnoresOrderBy(t *testing.T) {
 		},
 	}
 
-	service := NewModelCatalogServiceAPIService(provider, sources, nil, sourceLabels, nil)
+	service := NewModelCatalogServiceAPIService(provider, sources, nil, nil, sourceLabels, nil)
 
 	// Test that orderBy is ignored when recommended=true
 	resp, err := service.FindModels(
@@ -2032,6 +2035,354 @@ func TestFindModelsRecommendedIgnoresOrderBy(t *testing.T) {
 
 	// Verify models are sorted by recommended latency (mock returns models sorted by name)
 	require.True(t, len(response.Items) > 0)
+}
+
+func newTestServiceWithSources(models map[string]*model.CatalogModel) ModelCatalogServiceAPIServicer {
+	sources := catalog.NewSourceCollection()
+	sources.Merge("",
+		map[string]catalog.ModelSource{
+			"source1": {CatalogSource: model.CatalogSource{Id: "source1", Name: "Test Source 1"}},
+		},
+	)
+
+	sourceLabels := catalog.NewLabelCollection()
+
+	provider := &mockModelProvider{
+		models: models,
+	}
+
+	return NewModelCatalogServiceAPIService(provider, sources, nil, nil, sourceLabels, nil)
+}
+
+func TestFindModelsRecommendedWithNumericNextPageToken(t *testing.T) {
+	// Regression test: when recommended=true, FindModelsWithRecommendedLatency uses
+	// numeric offset tokens (e.g. "10") for pagination. The service must NOT validate
+	// these tokens as base64 cursors, which is the format used by DB-backed pagination.
+	service := newTestServiceWithSources(map[string]*model.CatalogModel{
+		"modelA": {Name: "Model A"},
+		"modelB": {Name: "Model B"},
+	})
+
+	resp, err := service.FindModels(
+		context.Background(),
+		true, // recommended
+		1,    // targetRPS
+		"ttft_p90",
+		"",
+		"",
+		"",
+		[]string{"source1"},
+		"",
+		[]string{""},
+		"",
+		"10",
+		model.ORDERBYFIELD_NAME,
+		model.SORTORDER_ASC,
+		"10", // numeric nextPageToken from FindModelsWithRecommendedLatency
+	)
+
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.Code)
+}
+
+func TestFindModelsNonRecommendedRejectsInvalidToken(t *testing.T) {
+	// When recommended=false, invalid nextPageToken should be rejected
+	service := newTestServiceWithSources(map[string]*model.CatalogModel{
+		"modelA": {Name: "Model A"},
+	})
+
+	resp, err := service.FindModels(
+		context.Background(),
+		false, // NOT recommended
+		0,
+		"",
+		"",
+		"",
+		"",
+		[]string{"source1"},
+		"",
+		[]string{""},
+		"",
+		"10",
+		model.ORDERBYFIELD_NAME,
+		model.SORTORDER_ASC,
+		"!!!not-base64", // definitively invalid base64 token
+	)
+
+	assert.Equal(t, http.StatusBadRequest, resp.Code)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid nextPageToken")
+}
+
+func TestFindModelsRecommendedRejectsNonNumericToken(t *testing.T) {
+	service := newTestServiceWithSources(map[string]*model.CatalogModel{
+		"modelA": {Name: "Model A"},
+	})
+
+	resp, err := service.FindModels(
+		context.Background(),
+		true, // recommended
+		1,
+		"ttft_p90",
+		"",
+		"",
+		"",
+		[]string{"source1"},
+		"",
+		[]string{""},
+		"",
+		"10",
+		model.ORDERBYFIELD_NAME,
+		model.SORTORDER_ASC,
+		"abc", // non-numeric token must be rejected
+	)
+
+	assert.Equal(t, http.StatusBadRequest, resp.Code)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid nextPageToken")
+}
+
+func writeTempYAML(t *testing.T, prefix, content string) *os.File {
+	t.Helper()
+	f, err := os.CreateTemp(t.TempDir(), prefix+"-*.yaml")
+	require.NoError(t, err)
+	_, err = f.WriteString(content)
+	require.NoError(t, err)
+	require.NoError(t, f.Sync())
+	return f
+}
+
+func TestPreviewCatalogSourceAssetTypeRouting(t *testing.T) {
+	service := newTestServiceWithSources(map[string]*model.CatalogModel{})
+
+	mcpCatalogData := `
+mcp_servers:
+  - name: kubernetes-mcp
+    description: "Kubernetes server"
+  - name: prometheus-mcp
+    description: "Prometheus server"
+  - name: vault-internal
+    description: "Vault internal"
+`
+
+	modelCatalogData := `
+models:
+  - name: "ibm-granite/granite-3b"
+    description: "Granite 3B"
+  - name: "meta-llama/llama-2-7b"
+    description: "Llama 2 7B"
+`
+
+	tests := []struct {
+		name               string
+		config             string
+		catalogData        string
+		filterStatus       string
+		expectedStatus     int
+		expectModelResp    bool
+		expectedTotalItems int
+	}{
+		{
+			name: "missing assetType defaults to model preview",
+			config: `
+type: yaml
+includedModels:
+  - "*"
+`,
+			catalogData:        modelCatalogData,
+			expectedStatus:     http.StatusOK,
+			expectModelResp:    true,
+			expectedTotalItems: 2,
+		},
+		{
+			name: "explicit assetType models routes to model preview",
+			config: `
+assetType: models
+type: yaml
+`,
+			catalogData:        modelCatalogData,
+			expectedStatus:     http.StatusOK,
+			expectModelResp:    true,
+			expectedTotalItems: 2,
+		},
+		{
+			name: "assetType mcp_servers routes to MCP preview",
+			config: `
+assetType: mcp_servers
+type: yaml
+includedServers:
+  - "kubernetes*"
+`,
+			catalogData:        mcpCatalogData,
+			expectedStatus:     http.StatusOK,
+			expectModelResp:    false,
+			expectedTotalItems: 3,
+		},
+		{
+			name: "unknown assetType falls through to model preview",
+			config: `
+assetType: agents
+type: yaml
+`,
+			catalogData:        modelCatalogData,
+			expectedStatus:     http.StatusOK,
+			expectModelResp:    true,
+			expectedTotalItems: 2,
+		},
+		{
+			name: "MCP preview with filterStatus included",
+			config: `
+assetType: mcp_servers
+type: yaml
+includedServers:
+  - "*-mcp"
+`,
+			catalogData:        mcpCatalogData,
+			filterStatus:       "included",
+			expectedStatus:     http.StatusOK,
+			expectModelResp:    false,
+			expectedTotalItems: 2,
+		},
+		{
+			name: "MCP preview with filterStatus excluded",
+			config: `
+assetType: mcp_servers
+type: yaml
+includedServers:
+  - "*-mcp"
+`,
+			catalogData:        mcpCatalogData,
+			filterStatus:       "excluded",
+			expectedStatus:     http.StatusOK,
+			expectModelResp:    false,
+			expectedTotalItems: 1,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			configFile := writeTempYAML(t, "config", tt.config)
+			var catalogDataFile *os.File
+			if tt.catalogData != "" {
+				catalogDataFile = writeTempYAML(t, "catalogdata", tt.catalogData)
+			}
+
+			resp, err := service.PreviewCatalogSource(
+				context.Background(),
+				configFile,
+				"100",
+				"",
+				tt.filterStatus,
+				catalogDataFile,
+			)
+
+			if tt.expectedStatus != http.StatusOK {
+				assert.Equal(t, tt.expectedStatus, resp.Code)
+				return
+			}
+
+			require.NoError(t, err)
+			assert.Equal(t, http.StatusOK, resp.Code)
+			require.NotNil(t, resp.Body)
+
+			if tt.expectModelResp {
+				modelResp, ok := resp.Body.(model.CatalogSourcePreviewResponse)
+				require.True(t, ok, "expected CatalogSourcePreviewResponse, got %T", resp.Body)
+				assert.Len(t, modelResp.Items, tt.expectedTotalItems)
+				assert.Equal(t, model.CATALOGASSETTYPE_MODELS, modelResp.AssetType)
+			} else {
+				assetResp, ok := resp.Body.(model.AssetSourcePreviewResponse)
+				require.True(t, ok, "expected AssetSourcePreviewResponse, got %T", resp.Body)
+				assert.Len(t, assetResp.Items, tt.expectedTotalItems)
+				assert.Equal(t, model.CATALOGASSETTYPE_MCP_SERVERS, assetResp.AssetType)
+			}
+		})
+	}
+}
+
+func TestPreviewCatalogSourceMCPSummary(t *testing.T) {
+	service := newTestServiceWithSources(map[string]*model.CatalogModel{})
+
+	configFile := writeTempYAML(t, "config", `
+assetType: mcp_servers
+type: yaml
+includedServers:
+  - "*-mcp"
+`)
+	catalogDataFile := writeTempYAML(t, "catalogdata", `
+mcp_servers:
+  - name: kubernetes-mcp
+    description: "Kubernetes"
+  - name: prometheus-mcp
+    description: "Prometheus"
+  - name: vault-internal
+    description: "Vault"
+`)
+
+	resp, err := service.PreviewCatalogSource(
+		context.Background(),
+		configFile,
+		"100",
+		"",
+		"",
+		catalogDataFile,
+	)
+
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.Code)
+
+	assetResp, ok := resp.Body.(model.AssetSourcePreviewResponse)
+	require.True(t, ok)
+
+	assert.Equal(t, model.CATALOGASSETTYPE_MCP_SERVERS, assetResp.AssetType)
+	assert.Equal(t, int32(3), assetResp.Summary.TotalAssets)
+	assert.Equal(t, int32(2), assetResp.Summary.IncludedAssets)
+	assert.Equal(t, int32(1), assetResp.Summary.ExcludedAssets)
+	assert.Len(t, assetResp.Items, 3)
+}
+
+func TestPreviewCatalogSourceNilConfig(t *testing.T) {
+	service := newTestServiceWithSources(map[string]*model.CatalogModel{})
+
+	resp, err := service.PreviewCatalogSource(
+		context.Background(),
+		nil,
+		"10",
+		"",
+		"",
+		nil,
+	)
+
+	assert.Equal(t, http.StatusBadRequest, resp.Code)
+	assert.Error(t, err)
+}
+
+func TestFindModelsRecommendedRejectsOverflowToken(t *testing.T) {
+	service := newTestServiceWithSources(map[string]*model.CatalogModel{
+		"modelA": {Name: "Model A"},
+	})
+
+	resp, err := service.FindModels(
+		context.Background(),
+		true, // recommended
+		1,
+		"ttft_p90",
+		"",
+		"",
+		"",
+		[]string{"source1"},
+		"",
+		[]string{""},
+		"",
+		"10",
+		model.ORDERBYFIELD_NAME,
+		model.SORTORDER_ASC,
+		"9999999999999", // exceeds MaxInt32, must be rejected
+	)
+
+	assert.Equal(t, http.StatusBadRequest, resp.Code)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid nextPageToken")
 }
 
 func TestGetAllModelPerformanceArtifactsWithConfigurableProperties(t *testing.T) {
@@ -2110,7 +2461,7 @@ func TestGetAllModelPerformanceArtifactsWithConfigurableProperties(t *testing.T)
 			})
 			sourceLabels := catalog.NewLabelCollection()
 
-			service := NewModelCatalogServiceAPIService(tc.provider, sources, nil, sourceLabels, nil)
+			service := NewModelCatalogServiceAPIService(tc.provider, sources, nil, nil, sourceLabels, nil)
 
 			resp, err := service.GetAllModelPerformanceArtifacts(
 				context.Background(),
@@ -2132,4 +2483,137 @@ func TestGetAllModelPerformanceArtifactsWithConfigurableProperties(t *testing.T)
 			assert.Equal(t, tc.expectedStatus, resp.Code)
 		})
 	}
+}
+
+func TestFindModelsOrderByRecommended(t *testing.T) {
+	sources := catalog.NewSourceCollection()
+	sources.Merge("",
+		map[string]catalog.ModelSource{
+			"source1": {CatalogSource: model.CatalogSource{Id: "source1", Name: "Test Source 1"}},
+		},
+	)
+
+	provider := &mockModelProvider{
+		models: map[string]*model.CatalogModel{
+			"modelA": {Name: "Model A"},
+			"modelB": {Name: "Model B"},
+		},
+	}
+
+	service := NewModelCatalogServiceAPIService(provider, sources, nil, nil, catalog.NewLabelCollection(), nil)
+
+	// orderBy=RECOMMENDED with recommendations=false should still use the recommendation path
+	resp, err := service.FindModels(
+		context.Background(),
+		false, // recommendations=false
+		0,     // targetRPS
+		"",    // latencyProperty
+		"",    // rpsProperty
+		"",    // hardwareCountProperty
+		"",    // hardwareTypeProperty
+		[]string{"source1"},
+		"",
+		[]string{""},
+		"",
+		"10",
+		model.OrderByField("RECOMMENDED"),
+		model.SORTORDER_ASC,
+		"",
+	)
+
+	assert.Equal(t, http.StatusOK, resp.Code)
+	require.NoError(t, err)
+
+	require.NotNil(t, resp.Body)
+	response, ok := resp.Body.(model.CatalogModelList)
+	require.True(t, ok)
+	require.True(t, len(response.Items) > 0)
+
+	// Verify the recommendation path was taken (mock records it)
+	assert.Equal(t, "ASC", provider.lastRecommendedSort)
+}
+
+func TestFindModelsOrderByRecommendedDesc(t *testing.T) {
+	sources := catalog.NewSourceCollection()
+	sources.Merge("",
+		map[string]catalog.ModelSource{
+			"source1": {CatalogSource: model.CatalogSource{Id: "source1", Name: "Test Source 1"}},
+		},
+	)
+
+	provider := &mockModelProvider{
+		models: map[string]*model.CatalogModel{
+			"modelA": {Name: "Model A"},
+			"modelB": {Name: "Model B"},
+		},
+	}
+
+	service := NewModelCatalogServiceAPIService(provider, sources, nil, nil, catalog.NewLabelCollection(), nil)
+
+	// orderBy=RECOMMENDED with sortOrder=DESC
+	resp, err := service.FindModels(
+		context.Background(),
+		false, // recommendations=false
+		0,     // targetRPS
+		"",    // latencyProperty
+		"",    // rpsProperty
+		"",    // hardwareCountProperty
+		"",    // hardwareTypeProperty
+		[]string{"source1"},
+		"",
+		[]string{""},
+		"",
+		"10",
+		model.OrderByField("RECOMMENDED"),
+		model.SORTORDER_DESC,
+		"",
+	)
+
+	assert.Equal(t, http.StatusOK, resp.Code)
+	require.NoError(t, err)
+
+	require.NotNil(t, resp.Body)
+	_, ok := resp.Body.(model.CatalogModelList)
+	require.True(t, ok)
+
+	// Verify DESC was passed to the recommendation path
+	assert.Equal(t, "DESC", provider.lastRecommendedSort)
+}
+
+// TestFindModelsOrderByRecommendedPagination is a regression test for the case where
+// recommendations=false and orderBy=RECOMMENDED: the numeric nextPageToken must not
+// be rejected by the base64-cursor validator used by the non-recommended path.
+func TestFindModelsOrderByRecommendedPagination(t *testing.T) {
+	sources := catalog.NewSourceCollection()
+	sources.Merge("",
+		map[string]catalog.ModelSource{
+			"source1": {CatalogSource: model.CatalogSource{Id: "source1", Name: "Test Source 1"}},
+		},
+	)
+
+	provider := &mockModelProvider{
+		models: map[string]*model.CatalogModel{
+			"modelA": {Name: "Model A"},
+		},
+	}
+
+	service := NewModelCatalogServiceAPIService(provider, sources, nil, nil, catalog.NewLabelCollection(), nil)
+
+	// Pass a numeric nextPageToken (the format produced by the recommended path).
+	// Before the fix, this was rejected with 400 because parsePaginationParams tried
+	// to base64-decode it as a DB cursor.
+	resp, err := service.FindModels(
+		context.Background(),
+		false, // recommendations=false — using orderBy instead
+		0, "", "", "", "",
+		[]string{"source1"},
+		"", []string{""}, "",
+		"10",
+		model.OrderByField("RECOMMENDED"),
+		model.SORTORDER_ASC,
+		"2", // numeric offset token from a prior recommended-path response
+	)
+
+	assert.Equal(t, http.StatusOK, resp.Code, "numeric nextPageToken must be accepted for orderBy=RECOMMENDED")
+	require.NoError(t, err)
 }

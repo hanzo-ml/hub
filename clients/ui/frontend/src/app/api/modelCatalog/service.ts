@@ -1,14 +1,16 @@
 import { APIOptions, handleRestFailures, isModArchResponse, restGET } from 'mod-arch-core';
 import {
-  CatalogArtifactList,
-  CatalogFilterOptionsList,
   CatalogLabelList,
-  CatalogModel,
-  CatalogModelList,
-  CatalogPerformanceArtifactList,
   CatalogSourceList,
   CatalogSourceListParams,
   CatalogLabelListParams,
+} from '~/app/shared/types/catalogTypes';
+import {
+  CatalogArtifactList,
+  CatalogFilterOptionsList,
+  CatalogModel,
+  CatalogModelList,
+  CatalogPerformanceArtifactList,
   ModelCatalogFilterStates,
   PerformanceArtifactsParams,
 } from '~/app/modelCatalogTypes';
@@ -38,7 +40,9 @@ export const getCatalogModelsBySource =
   ): Promise<CatalogModelList> => {
     const computedFilterQuery =
       filterQuery ??
-      (filterData && filterOptions ? filtersToFilterQuery(filterData, filterOptions) : '');
+      (filterData && filterOptions
+        ? filtersToFilterQuery(filterData, filterOptions, 'models', !!performanceParams)
+        : '');
 
     const allParams = {
       source: sourceId,

@@ -8,10 +8,8 @@ GRAPHQL_SCHEMA := internal/catalog/genqlient/queries/schema.graphql
 GO ?= "$(shell which go)"
 
 .PHONY: gen/openapi-server
-gen/openapi-server: internal/server/openapi/api_model_catalog_service.go
-
-internal/server/openapi/api_model_catalog_service.go: ../api/openapi/catalog.yaml
-	OPENAPI_GENERATOR="$(OPENAPI_GENERATOR)" ./scripts/gen_openapi_server.sh
+gen/openapi-server:
+	OPENAPI_GENERATOR="$(OPENAPI_GENERATOR)" ./scripts/gen_all_openapi_servers.sh
 
 .PHONY: gen/openapi
 gen/openapi: pkg/openapi/client.go
@@ -43,6 +41,17 @@ clean-graphql:
 .PHONY: clean-internal-server-openapi
 clean-internal-server-openapi:
 	while IFS= read -r file; do rm -f "internal/server/openapi/$$file"; done < internal/server/openapi/.openapi-generator/FILES
+	rm -f internal/server/openapi/api_model_catalog_service.go internal/server/openapi/api_mcp_catalog_service.go
+	rm -f internal/server/openapi/api_model.go internal/server/openapi/api_mcp.go
+
+.PHONY: gen/catalog-plugin
+gen/catalog-plugin:
+	@test -n "$(NAME)" || (echo "Usage: make gen/catalog-plugin NAME=<plugin-name> DESCRIPTION=<desc> ENTITIES=<Entity:type,...>" && exit 1)
+	@test -n "$(DESCRIPTION)" || (echo "Usage: make gen/catalog-plugin NAME=<plugin-name> DESCRIPTION=<desc> ENTITIES=<Entity:type,...>" && exit 1)
+	@test -n "$(ENTITIES)" || (echo "Usage: make gen/catalog-plugin NAME=<plugin-name> DESCRIPTION=<desc> ENTITIES=<Entity:type,...>" && exit 1)
+	$(GO) run ../tools/catalog-gen init --name=$(NAME) --description="$(DESCRIPTION)" $(foreach e,$(subst $(comma), ,$(ENTITIES)),--entity=$(e)) --root=..
+
+comma := ,
 
 .PHONY: test
 test:
